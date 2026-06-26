@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#13212b">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<title>Rounds Cockpit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+<div class="stage">
+  <div class="phone">
+    <div class="notch"></div>
+    <div class="statusbar"><span>7:24</span><span class="dots">▦ ▦ ▮</span></div>
+    <div class="app">
+
+      <!-- LOCK -->
+      <section class="screen active" id="lock">
+        <div class="mark">🔒</div>
+        <h1 id="lockTitle">Set a passcode</h1>
+        <div class="sub" id="lockSub">This key encrypts every record on this phone.<br>Nothing is stored unlocked.</div>
+        <div class="pin" id="pinDots"></div>
+        <div class="keys" id="keys"></div>
+        <div class="lockhint" id="lockHint"></div>
+      </section>
+
+      <!-- TODAY -->
+      <section class="screen haspad" id="today">
+        <div class="hero">
+          <div class="top">
+            <div><h1>Today's rounds</h1><div class="date" id="todayDate">—</div></div>
+            <button class="iconbtn" onclick="lockApp()" title="Lock">⏻</button>
+          </div>
+          <div class="digest"><div class="ic">!</div><div class="t" id="digest"></div></div>
+          <div class="routebar" id="routebar"></div>
+        </div>
+        <div class="demo-banner"><span>⚠</span><div><b>Foundation demo.</b> Seeded sample patients — don't enter real ones until the full app is built.</div></div>
+        <div id="list"></div>
+        <div style="height:20px"></div>
+        <button class="fab" onclick="openAdd()" style="bottom:86px">＋ Add</button>
+      </section>
+
+      <!-- INTAKE -->
+      <section class="screen haspad" id="intake">
+        <div class="in-head">
+          <h1>Nightly intake</h1>
+          <p>Paste a nurse update. It's de-identified on this phone, parsed in the cloud, then you confirm every change before it commits.</p>
+        </div>
+        <div class="sources">
+          <div class="src on" id="src_text" onclick="setSrc('text')"><div class="si">⌨</div><div class="sl">Paste / type</div></div>
+          <div class="src" id="src_voice" onclick="setSrc('voice')"><div class="si">🎙</div><div class="sl">Dictate</div></div>
+          <div class="src" id="src_photo" onclick="setSrc('photo')"><div class="si">📷</div><div class="sl">Snap</div></div>
+        </div>
+        <div class="intxt">
+          <textarea id="rawText" placeholder="e.g. Ramon dela Cruz rm 408 — repeat Na 126, headache still severe…"></textarea>
+        </div>
+        <button class="runbtn" id="deidBtn" onclick="runDeid()">De-identify &amp; preview what leaves the phone</button>
+        <div id="deidWrap"></div>
+        <div id="trayWrap"></div>
+        <button class="resetbtn" onclick="resetDemo()" style="margin-top:24px">reset demo data</button>
+      </section>
+    </div>
+
+    <!-- tab bar -->
+    <div class="tabbar">
+      <button class="tab active" id="tab_today" onclick="goTab('today')"><span class="ti">◉</span><span class="tl">Today</span></button>
+      <button class="tab" id="tab_intake" onclick="goTab('intake')"><span class="ti">⌥</span><span class="tl">Intake</span></button>
+    </div>
+
+    <!-- round card -->
+    <div class="scrim" id="scrim" onclick="closeCard()"></div>
+    <div class="sheet" id="sheet">
+      <div class="grab"></div>
+      <div class="sheet-scroll">
+        <div class="rc-head">
+          <div class="top">
+            <div><h2 id="rcName"></h2><div class="dx" id="rcDx"></div><div class="loc" id="rcLoc"></div></div>
+            <button class="rc-close" onclick="closeCard()">✕</button>
+          </div>
+          <div class="scorebar" id="rcScores"></div>
+        </div>
+        <div class="zone"><div class="zone-h ask"><span class="tag">ASK</span><span class="sub">bedside questions · tap to answer</span></div>
+          <div class="asklist" id="rcAsk"></div></div>
+        <div class="zone"><div class="zone-h look"><span class="tag">LOOK</span><span class="sub">trend-first · normal band shaded</span></div>
+          <div class="labgrid" id="rcLabs"></div>
+          <div class="vitals" id="rcVitals" style="margin-top:9px"></div>
+          <div class="meds" id="rcMeds" style="margin-top:9px"></div></div>
+        <div class="zone"><div class="zone-h do"><span class="tag">DO</span><span class="sub">close the loop</span></div>
+          <div class="actions" id="rcDo"></div></div>
+      </div>
+    </div>
+
+    <!-- add sheet -->
+    <div class="scrim" id="scrim2" onclick="closeAdd()"></div>
+    <div class="addsheet" id="addsheet">
+      <div class="grab"></div>
+      <h2>Add patient</h2>
+      <div class="lead">Core fields now — rich data (labs, meds, Ask) arrives via the nightly intake screen (step 2).</div>
+      <div class="form">
+        <div class="field"><label>Name</label><input id="f_name" placeholder="Juan Santos"></div>
+        <div class="frow">
+          <div class="field"><label>Age</label><input id="f_age" inputmode="numeric" placeholder="60"></div>
+          <div class="field"><label>Sex</label><select id="f_sex"><option>M</option><option>F</option></select></div>
+          <div class="field"><label>Day</label><input id="f_day" inputmode="numeric" placeholder="1"></div>
+        </div>
+        <div class="field"><label>Diagnosis</label><input id="f_dx" placeholder="Ischemic stroke"></div>
+        <div class="field"><label>Hospital</label><select id="f_hosp">
+          <option>Region I Medical Center</option><option>Gov. T. Sison Memorial</option><option>Nazareth General Hospital</option></select></div>
+        <div class="frow">
+          <div class="field"><label>Room</label><input id="f_room" placeholder="305"></div>
+          <div class="field"><label>Latest Na</label><input id="f_na" inputmode="numeric" placeholder="138"><div class="hint">seeds the trend</div></div>
+        </div>
+      </div>
+      <div class="formbtns"><button class="btn ghost" onclick="closeAdd()">Cancel</button><button class="btn primary" onclick="savePatient()">Encrypt &amp; save</button></div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+  </div>
+</div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
