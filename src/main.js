@@ -160,11 +160,14 @@ function openCard(id) {
   $('rcAsk').innerHTML = p.ask.map((a, ai) => `
     <div class="askrow"><div class="q">${esc(a.q)}${a.s ? `<small>${esc(a.s)}</small>` : ''}</div>
       <div class="toggle">${a.t.map((opt, oi) => `<button class="${oi === a.on ? 'on ' + a.k : ''}" onclick="pick(${ai},${oi})">${esc(opt)}</button>`).join('')}</div></div>`).join('');
-  const naLast = p.na[p.na.length - 1], naCls = naLast < 135 ? 'bad' : (naLast < 137 ? 'warn' : '');
-  $('rcLabs').innerHTML = `
+  const hasNa = (p.na || []).length > 0;
+  const naLast = hasNa ? p.na[p.na.length - 1] : null, naCls = naLast == null ? '' : naLast < 135 ? 'bad' : (naLast < 137 ? 'warn' : '');
+  const naCell = hasNa ? `
     <div class="labcell wide"><div class="lh"><span class="nm">Sodium · trend</span><span class="val ${naCls}">${naLast}<small> mmol/L</small></span></div>
-      <div class="spark">${sparkline(p.na)}</div>
-      <div class="sparkrow"><span class="seq">${esc(p.naLabel)}</span><span class="seq">band 135–145</span></div></div>
+      ${p.na.length >= 2 ? `<div class="spark">${sparkline(p.na)}</div>
+      <div class="sparkrow"><span class="seq">${esc(p.naLabel)}</span><span class="seq">band 135–145</span></div>`
+        : `<div class="seq mono" style="font-size:11px;color:var(--faint);margin-top:6px">one reading so far — trend builds as you commit updates</div>`}</div>` : '';
+  $('rcLabs').innerHTML = `${naCell}
     <div class="labcell"><div class="lh"><span class="nm">Potassium</span></div><div class="val ${p.kbad ? 'bad' : ''}">${esc(p.k.v)}<small> mmol/L</small></div><div class="seq mono" style="font-size:10px;color:var(--faint);margin-top:4px">${esc(p.k.s)}</div></div>
     <div class="labcell"><div class="lh"><span class="nm">Serum osmo</span></div><div class="val ${p.osmo.v !== '—' && +p.osmo.v < 275 ? 'warn' : ''}">${esc(p.osmo.v)}</div><div class="seq mono" style="font-size:10px;color:var(--faint);margin-top:4px">${esc(p.osmo.s)}</div></div>`;
   $('rcVitals').innerHTML = p.vitals.map((v) => `<div class="vital"><div class="k">${esc(v[0])}</div><div class="v">${esc(v[1])}</div></div>`).join('');
@@ -426,20 +429,18 @@ function closeAdd() { $('scrim2').classList.remove('show'); $('addsheet').classL
 async function savePatient() {
   const g = (id) => $(id).value.trim();
   const name = g('f_name'); if (!name) { toast('Name is required'); return; }
-  const na = g('f_na') || '138', naN = +na;
-  const triage = naN < 130 ? 'r' : naN < 135 ? 'a' : 'g';
+  // No sodium captured at add time — not every patient needs Na monitoring, and
+  // labs arrive later via the nightly intake. Triage stays green until real data
+  // lands (computeTriage derives it on the next commit).
   const p = newPatient({
     name, age: g('f_age'), sex: g('f_sex'), dx: g('f_dx'), day: g('f_day') || '1',
-    hospital: g('f_hosp'), room: g('f_room'), triage,
-    flags: [{ t: 'Na ' + na, lv: triage === 'r' ? 'bad' : triage === 'a' ? 'warn' : '' }],
-    scores: [{ l: 'GCS', v: '15', a: '' }, { l: 'NA', v: na, a: '' }],
+    hospital: g('f_hosp'), room: g('f_room'), triage: 'g',
+    scores: [{ l: 'GCS', v: '15', a: '' }],
     ask: [{ q: 'Bowel movement', s: '', t: ['Yes', 'No'], on: 0, k: 'pos' }, { q: 'Sleep', s: '', t: ['Good', 'Poor'], on: 0, k: 'pos' }],
-    na: [naN], naLabel: 'today',
     vitals: [['BP', '—'], ['HR', '—'], ['RR', '—'], ['TEMP', '—'], ['SPO₂', '—']],
-    snapshots: [{ date: 'today', na: naN }],
   });
   await store.savePatient(p);
-  ['f_name', 'f_age', 'f_day', 'f_dx', 'f_room', 'f_na'].forEach((i) => ($(i).value = ''));
+  ['f_name', 'f_age', 'f_day', 'f_dx', 'f_room'].forEach((i) => ($(i).value = ''));
   closeAdd(); await loadPatients(); renderToday(); toast('Encrypted & saved', '✓');
 }
 async function resetDemo() {
