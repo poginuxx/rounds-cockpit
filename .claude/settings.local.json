@@ -10,7 +10,8 @@
       "Bash(npm install *)",
       "Bash(git -C /Users/francisgeraldlopez/Desktop/PhysicianCockpit/rounds-cockpit status)",
       "Bash(git -C /Users/francisgeraldlopez/Desktop/PhysicianCockpit/rounds-cockpit diff --stat)",
-      "Bash(git -C /Users/francisgeraldlopez/Desktop/PhysicianCockpit/rounds-cockpit diff .claude/settings.local.json)"
+      "Bash(git -C /Users/francisgeraldlopez/Desktop/PhysicianCockpit/rounds-cockpit diff .claude/settings.local.json)",
+      "mcp__Claude_Preview__preview_start"
     ]
   }
 }
