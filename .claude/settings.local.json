@@ -11,7 +11,12 @@
       "Bash(git -C /Users/francisgeraldlopez/Desktop/PhysicianCockpit/rounds-cockpit status)",
       "Bash(git -C /Users/francisgeraldlopez/Desktop/PhysicianCockpit/rounds-cockpit diff --stat)",
       "Bash(git -C /Users/francisgeraldlopez/Desktop/PhysicianCockpit/rounds-cockpit diff .claude/settings.local.json)",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "Bash(git -C /Users/francisgeraldlopez/Desktop/PhysicianCockpit/rounds-cockpit status --short)",
+      "Bash(git -C /Users/francisgeraldlopez/Desktop/PhysicianCockpit/rounds-cockpit diff --stat src/styles.css)",
+      "Bash(git -C /Users/francisgeraldlopez/Desktop/PhysicianCockpit/rounds-cockpit show HEAD:src/styles.css)",
+      "Bash(git reset *)",
+      "Bash(git restore *)"
     ]
   }
 }
