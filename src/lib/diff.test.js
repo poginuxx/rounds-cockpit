@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeTriage, diffSnapshots, commitPatient, snapshotOf, buildTimeline } from './diff.js';
+import { computeTriage, diffSnapshots, commitPatient, snapshotOf, buildTimeline, neuroStatus } from './diff.js';
 import { newPatient } from './schema.js';
 
 describe('computeTriage', () => {
@@ -88,5 +88,42 @@ describe('snapshotOf', () => {
   it('captures the latest salient values', () => {
     const p = newPatient({ na: [140, 137], vitals: [['RR', '22'], ['SPO₂', '96%'], ['TEMP', '37.0']] });
     expect(snapshotOf(p, '06/17')).toEqual({ date: '06/17', na: 137, rr: 22, spo2: 96, temp: 37 });
+  });
+
+  it('captures gcs and nihss from scores[] when present', () => {
+    const p = newPatient({ na: [137], scores: [{ l: 'GCS', v: '13' }, { l: 'NIHSS', v: '8' }] });
+    const snap = snapshotOf(p, '06/17');
+    expect(snap.gcs).toBe(13);
+    expect(snap.nihss).toBe(8);
+  });
+
+  it('omits neuro keys entirely for a patient without those scores', () => {
+    const p = newPatient({ na: [137], scores: [{ l: 'NA', v: '137' }] });
+    const snap = snapshotOf(p, '06/17');
+    expect('gcs' in snap).toBe(false);
+    expect('nihss' in snap).toBe(false);
+  });
+});
+
+describe('neuroStatus', () => {
+  it('flags BOTH a falling GCS and a rising NIHSS as worsening', () => {
+    expect(neuroStatus([14, 13, 12], 'down')).toBe('bad'); // GCS dropping
+    expect(neuroStatus([4, 6, 8], 'up')).toBe('bad');      // NIHSS climbing
+  });
+
+  it('does not colour the opposite direction as worsening', () => {
+    expect(neuroStatus([12, 14], 'down')).toBe('good');    // GCS rising = improving
+    expect(neuroStatus([8, 4], 'up')).toBe('good');        // NIHSS falling = improving
+  });
+
+  it('grades severity: 1-step move is a warn, 2+ is bad', () => {
+    expect(neuroStatus([15, 14], 'down')).toBe('warn');
+    expect(neuroStatus([15, 13], 'down')).toBe('bad');
+    expect(neuroStatus([15, 15, 15], 'down')).toBe('good');
+  });
+
+  it('is safe with too little data', () => {
+    expect(neuroStatus([15], 'down')).toBe('good');
+    expect(neuroStatus([], 'up')).toBe('good');
   });
 });

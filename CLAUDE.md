@@ -71,7 +71,16 @@ npm run build    # -> dist/
   Card header ("History"). Renders the sodium trajectory + captured vitals per day,
   newest first, with a "what changed" line from `diff.js → buildTimeline`. Seed
   `snapshots[]` are backfilled from `na[]`/`naLabel` in `schema.js`.
-- **Neuro modules** — GCS/NIHSS ribbons, motor grid, seizure log, stroke clock.
+- **Neuro modules** — a reusable **Neuro section** now lives in the Round Card's
+  LOOK zone: a collapsed-by-default expandable block (the `expandable()` helper +
+  `.nblock` styles in `main.js`/`styles.css`) that the remaining modules will reuse.
+  - **GCS / NIHSS ribbons** — ✅ DONE. Direction-aware trend ribbons in the sodium
+    sparkline style; a FALLING GCS and a RISING NIHSS are coloured as worsening via
+    `diff.js → neuroStatus`. A bedside stepper writes today's score to `scores[]`
+    (persisted, encrypted); the new value becomes a ribbon point at the next intake
+    commit (`snapshotOf` captures gcs/nihss). Seed `gcs[]`/`nihss[]` history is
+    backfilled in `schema.js`. Ribbons render only for metrics that have data.
+  - motor grid, seizure log, stroke clock — still to build, inside the same section.
 - **Commute / prep mode** — calm read-only overnight diff.
 - **Settings** — store the model API key in the encrypted vault and wire `getApiKey` in
   `main.js` to it (currently returns null → offline parser). See README "Cloud parsing".

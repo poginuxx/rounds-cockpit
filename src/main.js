@@ -12,7 +12,7 @@
 import * as store from './lib/store.js';
 import { deidentify } from './lib/deid.js';
 import { parseUpdate } from './lib/parser.js';
-import { commitPatient, buildDigest, buildTimeline } from './lib/diff.js';
+import { commitPatient, buildDigest, buildTimeline, neuroStatus } from './lib/diff.js';
 import { newPatient, seedPatients, HOSPITALS } from './lib/schema.js';
 
 // ---- where your model API key would come from (kept null = offline parsing) ----
@@ -155,9 +155,7 @@ function openCard(id) {
   $('rcName').textContent = p.name;
   $('rcDx').textContent = `${p.dx} · Day ${p.day}${p.detail ? ' · ' + p.detail : ''}`;
   $('rcLoc').textContent = `${p.hospital.toUpperCase()} · RM ${p.room}`;
-  $('rcScores').innerHTML = p.scores.map((s) => `
-    <div class="score"><div class="lbl">${s.l}</div>
-    <div class="v ${s.d ? 'delta-bad' : ''}">${s.v}${s.a ? `<span class="arr ${s.a}">${s.a === 'dn' ? '↓' : '↑'}</span>` : ''}</div></div>`).join('');
+  renderScores(p);
   $('rcAsk').innerHTML = p.ask.map((a, ai) => `
     <div class="askrow"><div class="q">${esc(a.q)}${a.s ? `<small>${esc(a.s)}</small>` : ''}</div>
       <div class="toggle">${a.t.map((opt, oi) => `<button class="${oi === a.on ? 'on ' + a.k : ''}" onclick="pick(${ai},${oi})">${esc(opt)}</button>`).join('')}</div></div>`).join('');
@@ -178,9 +176,101 @@ function openCard(id) {
     <div class="act" onclick="toast('Flagged for tomorrow','✓')"><span class="ai">⚑</span><span class="at">Flag follow-up</span></div>
     <div class="act" onclick="toast('Co-manage note sent','✓')"><span class="ai">↪</span><span class="at">Ping co-manager</span></div>
     <div class="act" onclick="toast('Progress note saved','✓')"><span class="ai">▤</span><span class="at">Save note</span></div>`;
+  renderNeuro(p);
   $('scrim').classList.add('show'); $('sheet').classList.add('show');
 }
 function closeCard() { closeTimeline(); $('scrim').classList.remove('show'); $('sheet').classList.remove('show'); state.currentId = null; }
+
+function renderScores(p) {
+  $('rcScores').innerHTML = p.scores.map((s) => `
+    <div class="score"><div class="lbl">${s.l}</div>
+    <div class="v ${s.d ? 'delta-bad' : ''}">${s.v}${s.a ? `<span class="arr ${s.a}">${s.a === 'dn' ? '↓' : '↑'}</span>` : ''}</div></div>`).join('');
+}
+
+// ============================ Neuro modules ============================
+// A reusable collapsed-by-default block (native <details>) that the later
+// neuro modules — motor grid, seizure log, stroke clock — will reuse. The
+// first module living inside it is the GCS / NIHSS trend ribbons.
+const STATUS_COL = { good: 'var(--teal)', warn: 'var(--amber)', bad: 'var(--red)' };
+
+function expandable(title, sub, bodyHtml, open = false) {
+  return `<details class="nblock"${open ? ' open' : ''}>
+    <summary><span class="ntag">${esc(title)}</span><span class="nsub">${esc(sub)}</span><span class="ncaret">▾</span></summary>
+    <div class="nbody">${bodyHtml}</div></details>`;
+}
+
+/**
+ * A neuro trend ribbon — same band+polyline+dots style as the sodium sparkline,
+ * but coloured by DIRECTION via lib/diff.neuroStatus (falling GCS / rising NIHSS
+ * are worsening). `cfg`: { lo, hi, band:[lo,hi], worseDir }.
+ */
+function ribbon(series, cfg) {
+  const w = 150, h = 34;
+  const min = Math.min(...series, cfg.band[0]), max = Math.max(...series, cfg.band[1]);
+  const rng = (max - min) || 1;
+  const x = (i) => 6 + i * ((w - 12) / (series.length - 1));
+  const y = (v) => h - 4 - ((v - min) / rng) * (h - 10);
+  const pts = series.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const bandTop = y(Math.min(cfg.band[1], max)), bandBot = y(Math.max(cfg.band[0], min));
+  const col = STATUS_COL[neuroStatus(series, cfg.worseDir)];
+  return `<svg width="100%" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="display:block">
+    <rect x="0" y="${bandTop.toFixed(1)}" width="${w}" height="${(bandBot - bandTop).toFixed(1)}" fill="var(--green-soft)"/>
+    <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+    ${series.map((v, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="${i === series.length - 1 ? 2.6 : 1.6}" fill="${i === series.length - 1 ? col : '#9AA4AD'}"/>`).join('')}</svg>`;
+}
+
+// Each ribbon-able neuro metric: where its data lives + which way is worsening.
+const NEURO_METRICS = [
+  { key: 'gcs', label: 'GCS', sub: 'normal band 13–15', band: [13, 15], lo: 3, hi: 15, worseDir: 'down' },
+  { key: 'nihss', label: 'NIHSS', sub: 'normal band 0–4', band: [0, 4], lo: 0, hi: 42, worseDir: 'up' },
+];
+
+function neuroRibbonCell(m, series) {
+  const status = neuroStatus(series, m.worseDir);
+  const last = series[series.length - 1];
+  const cls = status === 'bad' ? 'bad' : status === 'warn' ? 'warn' : '';
+  const dir = status === 'good' ? 'stable / improving' : 'worsening';
+  return `<div class="labcell wide">
+    <div class="lh"><span class="nm">${esc(m.label)} · trend</span><span class="val ${cls}">${last}<small> ${esc(dir)}</small></span></div>
+    <div class="spark">${ribbon(series, m)}</div>
+    <div class="sparkrow"><span class="seq">${esc(m.sub)}</span><span class="seq">${esc(m.worseDir === 'down' ? '↓ worse' : '↑ worse')}</span></div>
+    <div class="nstep"><button onclick="neuroStep('${m.label}',-1)">−</button>
+      <span class="nstepv" id="nstep_${m.key}">${(p_score(state.byId[state.currentId], m.label) ?? last)}</span>
+      <button onclick="neuroStep('${m.label}',1)">+</button>
+      <span class="nstephint">today · captured at next commit</span></div></div>`;
+}
+
+// numeric current value of a score label, or null
+function p_score(p, label) {
+  const s = (p?.scores || []).find((x) => x.l === label);
+  if (!s) return null;
+  const m = String(s.v).match(/-?\d+(\.\d+)?/);
+  return m ? +m[0] : null;
+}
+
+function renderNeuro(p) {
+  const cells = NEURO_METRICS.map((m) => {
+    const series = (p.snapshots || []).map((s) => s[m.key]).filter((v) => v != null);
+    return series.length >= 2 ? neuroRibbonCell(m, series) : '';
+  }).filter(Boolean).join('');
+  // Render the Neuro section only when at least one ribbon has data.
+  $('rcNeuro').innerHTML = cells
+    ? expandable('Neuro', 'GCS / NIHSS trend ribbons', `<div class="labgrid">${cells}</div>`)
+    : '';
+}
+
+async function neuroStep(label, d) {
+  const p = state.byId[state.currentId]; if (!p) return;
+  const sc = p.scores.find((s) => s.l === label); if (!sc) return;
+  const m = NEURO_METRICS.find((x) => x.label === label); if (!m) return;
+  const cur = p_score(p, label) ?? 0;
+  const v = Math.max(m.lo, Math.min(m.hi, cur + d));
+  if (v === cur) return;
+  sc.v = String(v);
+  await store.savePatient(p);          // encrypted vault — invariant #2
+  renderScores(p);                     // current value updates now…
+  renderNeuro(p);                      // …ribbon point only moves after next commit
+}
 
 // ============================ Patient timeline ============================
 // Read-only admission history. All trajectory/diff logic lives in lib/diff.js;
@@ -362,7 +452,7 @@ let tt;
 function toast(m, ok) { const t = $('toast'); t.innerHTML = (ok ? `<span class="ok">${ok}</span>` : '') + m; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 1800); }
 
 // ---- expose handlers for inline onclick in index.html ----
-Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, closeTimeline, pick, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, resetDemo, toast });
+Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, closeTimeline, pick, neuroStep, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, resetDemo, toast });
 
 // ---- register the PWA service worker (added by vite-plugin-pwa on build) ----
 if ('serviceWorker' in navigator) {

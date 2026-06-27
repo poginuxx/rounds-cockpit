@@ -19,6 +19,11 @@ function num(v) {
 function hasSeizureFlag(p) {
   return (p.flags || []).some((f) => /seizure/i.test(f.t) && f.lv === 'bad');
 }
+/** Numeric value of a named score (scores[] entry whose label is `l`), or null. */
+function scoreNum(p, label) {
+  const s = (p.scores || []).find((x) => x.l === label);
+  return s ? num(s.v) : null;
+}
 
 /**
  * Triage colour from absolute thresholds AND overnight deltas.
@@ -54,13 +59,39 @@ export function computeTriage(p) {
 /** Capture today's salient values for the trend history. */
 export function snapshotOf(p, date) {
   const na = p.na || [];
-  return {
+  const snap = {
     date,
     na: na.length ? na[na.length - 1] : null,
     rr: num(vital(p, 'RR')),
     spo2: num(vital(p, 'SPO₂')),
     temp: num(vital(p, 'TEMP')),
   };
+  // Neuro scores are optional: only capture a key when the patient carries it,
+  // so the ribbon for a metric appears only for patients that have data.
+  const gcs = scoreNum(p, 'GCS');
+  if (gcs != null) snap.gcs = gcs;
+  const nihss = scoreNum(p, 'NIHSS');
+  if (nihss != null) snap.nihss = nihss;
+  return snap;
+}
+
+/**
+ * Direction-aware status for a neuro trend ribbon.
+ *
+ * Unlike sodium (where colour is about being inside the band), neuro scores
+ * have a *direction* of harm: a FALLING GCS and a RISING NIHSS both mean the
+ * patient is worsening. `worseDir` says which way is bad ('down' for GCS,
+ * 'up' for NIHSS). Returns 'bad' | 'warn' | 'good' from the net move across
+ * the series. Pure — colour decisions live here, not in the DOM layer.
+ */
+export function neuroStatus(series, worseDir) {
+  const s = (series || []).filter((v) => v != null);
+  if (s.length < 2) return 'good';
+  const first = s[0], last = s[s.length - 1];
+  const move = worseDir === 'down' ? first - last : last - first; // +ve = worsened
+  if (move >= 2) return 'bad';
+  if (move >= 1) return 'warn';
+  return 'good';
 }
 
 /** What changed between two snapshots, most-salient first. */

@@ -53,6 +53,20 @@ function backfillSnapshots(p) {
     return snap;
   });
 }
+/**
+ * Overlay seed-only neuro day-series (gcs[], nihss[]) onto the backfilled
+ * snapshots, aligned oldest→newest by index. The series live on the seed
+ * literal only — they are deleted from the stored record so the canonical
+ * snapshot shape ({ date, na, ... , gcs?, nihss? }) stays clean.
+ */
+function attachNeuro(np, gcs, nihss) {
+  (np.snapshots || []).forEach((s, i) => {
+    if (gcs && gcs[i] != null) s.gcs = gcs[i];
+    if (nihss && nihss[i] != null) s.nihss = nihss[i];
+  });
+  delete np.gcs;
+  delete np.nihss;
+}
 function parseEnd(label) {
   const m = String(label || '').match(/(\d{1,2})\/(\d{1,2})\s*$/);
   return m ? { mm: +m[1], dd: +m[2] } : { mm: 6, dd: 16 };
@@ -77,7 +91,8 @@ export function seedPatients() {
       hospital:'Region I Medical Center', room:'408', triage:'r', newCount:3,
       overnight:{ who:'Ramon dela Cruz', txt:'Na fell to ', k:'128', tail:', vasospasm watch' },
       flags:[{t:'Na 128 ↓',lv:'bad'},{t:'HA severe',lv:'warn'}],
-      scores:[{l:'GCS',v:'14',a:''},{l:'WFNS',v:'3',a:''},{l:'NA',v:'128',a:'dn',d:true}],
+      scores:[{l:'GCS',v:'13',a:'',d:true},{l:'WFNS',v:'3',a:''},{l:'NA',v:'128',a:'dn',d:true}],
+      gcs:[15,15,14,14,13],
       ask:[{q:'Headache',s:'thunderclap → now severe',t:['Better','Same','Worse'],on:2,k:'neg'},
            {q:'Bowel movement',s:'last: yesterday',t:['Yes','No'],on:0,k:'pos'},
            {q:'Sleep',s:'',t:['Good','Poor'],on:1,k:'neg'},
@@ -94,6 +109,7 @@ export function seedPatients() {
       overnight:{ who:'Aurora Mendoza', txt:'', k:'no BM ×2 days', tail:'' },
       flags:[{t:'Na 131 ↓',lv:'warn'},{t:'No BM ×2',lv:'bad'}],
       scores:[{l:'NIHSS',v:'6',a:'dn'},{l:'GCS',v:'15',a:''},{l:'NA',v:'131',a:'dn'}],
+      gcs:[15,15,15,15,15], nihss:[10,9,8,7,6],
       ask:[{q:'Bowel movement',s:'⚑ none ×2 days',t:['Yes','No'],on:1,k:'neg'},
            {q:'Sleep',s:'',t:['Good','Poor'],on:1,k:'neg'},
            {q:'Swallowing',s:'dysphagia screen',t:['Safe','Watch'],on:1,k:'neu'},
@@ -108,6 +124,7 @@ export function seedPatients() {
       hospital:'Gov. T. Sison Memorial', room:'215', triage:'g', newCount:0, overnight:null, ready:true,
       flags:[{t:'seizure-free 36h',lv:''}],
       scores:[{l:'GCS',v:'15',a:''},{l:'SZ-FREE',v:'36h',a:'dn'},{l:'NA',v:'140',a:''}],
+      gcs:[15,15,15,15,15],
       ask:[{q:'Any seizures',s:'since last visit',t:['No','Yes'],on:0,k:'pos'},
            {q:'Aura',s:'',t:['No','Yes'],on:0,k:'pos'},
            {q:'Sleep',s:'',t:['Good','Poor'],on:0,k:'pos'},
@@ -122,6 +139,7 @@ export function seedPatients() {
       hospital:'Nazareth General Hospital', room:'302', triage:'a', newCount:0, overnight:null,
       flags:[{t:'FVC watch',lv:'warn'},{t:'IVIG D4·5',lv:''}],
       scores:[{l:'FVC',v:'1.8L',a:'dn',d:true},{l:'GCS',v:'15',a:''},{l:'NA',v:'137',a:''}],
+      gcs:[15,15,15,15,15],
       ask:[{q:'Breathing / single-breath count',s:'⚑ trend down',t:['≥20','<20'],on:1,k:'neg'},
            {q:'Swallowing secretions',s:'',t:['Safe','Watch'],on:1,k:'neu'},
            {q:'Bowel movement',s:'',t:['Yes','No'],on:0,k:'pos'},
@@ -136,6 +154,7 @@ export function seedPatients() {
       hospital:'Nazareth General Hospital', room:'310', triage:'g', newCount:0, overnight:null,
       flags:[{t:'afebrile 24h',lv:''},{t:'Ceftriaxone D4·14',lv:''}],
       scores:[{l:'GCS',v:'15',a:''},{l:'TEMP',v:'36.9',a:'dn'},{l:'NA',v:'136',a:''}],
+      gcs:[14,15,15,15,15],
       ask:[{q:'Headache',s:'',t:['Better','Same','Worse'],on:0,k:'pos'},
            {q:'Neck stiffness',s:'',t:['Better','Same'],on:0,k:'pos'},
            {q:'Bowel movement',s:'',t:['Yes','No'],on:0,k:'pos'},
@@ -148,6 +167,7 @@ export function seedPatients() {
   ].map((p) => {
     const np = newPatient(p);
     np.snapshots = backfillSnapshots(np);
+    attachNeuro(np, p.gcs, p.nihss);
     return np;
   });
 }
