@@ -80,7 +80,10 @@
         <div class="rc-head">
           <div class="top">
             <div><h2 id="rcName"></h2><div class="dx" id="rcDx"></div><div class="loc" id="rcLoc"></div></div>
-            <button class="rc-close" onclick="closeCard()">✕</button>
+            <div class="rc-actions">
+              <button class="rc-tl" onclick="openTimeline()" title="Admission timeline"><span>🕒</span>History</button>
+              <button class="rc-close" onclick="closeCard()">✕</button>
+            </div>
           </div>
           <div class="scorebar" id="rcScores"></div>
         </div>
@@ -92,6 +95,24 @@
           <div class="meds" id="rcMeds" style="margin-top:9px"></div></div>
         <div class="zone"><div class="zone-h do"><span class="tag">DO</span><span class="sub">close the loop</span></div>
           <div class="actions" id="rcDo"></div></div>
+      </div>
+    </div>
+
+    <!-- timeline sheet (read-only admission history) -->
+    <div class="scrim" id="scrim3" onclick="closeTimeline()"></div>
+    <div class="sheet" id="tlsheet">
+      <div class="grab"></div>
+      <div class="sheet-scroll">
+        <div class="rc-head">
+          <div class="top">
+            <div><h2 id="tlName"></h2><div class="dx" id="tlDx"></div><div class="loc" id="tlLoc"></div></div>
+            <button class="rc-close" onclick="closeTimeline()">✕</button>
+          </div>
+        </div>
+        <div class="zone"><div class="zone-h look"><span class="tag">TREND</span><span class="sub">sodium · admission to date</span></div>
+          <div class="labgrid" id="tlTrend"></div></div>
+        <div class="zone"><div class="zone-h ask"><span class="tag">HISTORY</span><span class="sub">newest first · what changed each day</span></div>
+          <div id="tlList"></div></div>
       </div>
     </div>
 

@@ -30,6 +30,39 @@ export function newPatient(fields = {}) {
   };
 }
 
+/**
+ * Backfill a patient's snapshots[] from their existing sodium series so the
+ * timeline shows the real multi-day trajectory immediately. The snapshot SHAPE
+ * is unchanged ({ date, na, rr, spo2, temp }) — this only populates more days.
+ * One reading per day, ending on the latest date in naLabel; the final day
+ * keeps any vitals the original seed snapshot already carried.
+ */
+function backfillSnapshots(p) {
+  const na = p.na || [];
+  if (na.length < 2) return p.snapshots || [];
+  const end = parseEnd(p.naLabel);                 // {mm, dd} of the latest reading
+  const last = (p.snapshots || [])[(p.snapshots || []).length - 1] || {};
+  return na.map((v, i) => {
+    const back = na.length - 1 - i;                // days before the latest reading
+    const snap = { date: stepBack(end, back), na: v };
+    if (i === na.length - 1) {                      // newest day inherits seed vitals
+      if (last.rr != null) snap.rr = last.rr;
+      if (last.spo2 != null) snap.spo2 = last.spo2;
+      if (last.temp != null) snap.temp = last.temp;
+    }
+    return snap;
+  });
+}
+function parseEnd(label) {
+  const m = String(label || '').match(/(\d{1,2})\/(\d{1,2})\s*$/);
+  return m ? { mm: +m[1], dd: +m[2] } : { mm: 6, dd: 16 };
+}
+function stepBack({ mm, dd }, days) {
+  const d = new Date(2026, mm - 1, dd);
+  d.setDate(d.getDate() - days);
+  return String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0');
+}
+
 /** Hospitals in physical round order. Editable per user. */
 export const HOSPITALS = [
   'Region I Medical Center',
@@ -112,5 +145,9 @@ export function seedPatients() {
       meds:[{n:'Ceftriaxone',d:'2g BID',day:'D4·14',w:false},{n:'Dexamethasone',d:'10mg q6h',day:'D4',w:false}],
       doMain:{t:'Continue plan',s:'afebrile 24h — improving on ceftriaxone'},
       snapshots:[{date:'06/16',na:136}] },
-  ].map((p) => newPatient(p));
+  ].map((p) => {
+    const np = newPatient(p);
+    np.snapshots = backfillSnapshots(np);
+    return np;
+  });
 }

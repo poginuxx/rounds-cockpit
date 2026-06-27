@@ -76,6 +76,21 @@ export function diffSnapshots(prev, cur) {
   return out;
 }
 
+/**
+ * Build a per-patient admission timeline from snapshots[], newest day first.
+ * Each row pairs a snapshot with what changed since the previous one — the
+ * per-day diff is delegated to diffSnapshots, NOT re-derived here.
+ */
+export function buildTimeline(p) {
+  const snaps = p.snapshots || [];
+  const rows = snaps.map((s, i) => ({
+    snapshot: s,
+    changes: diffSnapshots(i > 0 ? snaps[i - 1] : null, s),
+    baseline: i === 0,
+  }));
+  return rows.reverse(); // newest first
+}
+
 /** Build the "overnight changes" digest for the Today header. */
 export function buildDigest(patients) {
   return patients.filter((p) => p.overnight).map((p) => p.overnight);

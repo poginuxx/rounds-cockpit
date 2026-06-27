@@ -67,7 +67,10 @@ npm run build    # -> dist/
 ## Roadmap (not yet built)
 - **Capture / OCR** screen (paper lab slips) feeding the same intake confirm flow.
 - **Billing / PhilHealth** (CF1/CF2/CF4/CSF assembly) — `doMain.bill` already flags it.
-- **Patient timeline** — `patient.snapshots[]` already accumulates the history it needs.
+- **Patient timeline** — ✅ DONE. Read-only admission history reached from the Round
+  Card header ("History"). Renders the sodium trajectory + captured vitals per day,
+  newest first, with a "what changed" line from `diff.js → buildTimeline`. Seed
+  `snapshots[]` are backfilled from `na[]`/`naLabel` in `schema.js`.
 - **Neuro modules** — GCS/NIHSS ribbons, motor grid, seizure log, stroke clock.
 - **Commute / prep mode** — calm read-only overnight diff.
 - **Settings** — store the model API key in the encrypted vault and wire `getApiKey` in

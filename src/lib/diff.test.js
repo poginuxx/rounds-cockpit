@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeTriage, diffSnapshots, commitPatient, snapshotOf } from './diff.js';
+import { computeTriage, diffSnapshots, commitPatient, snapshotOf, buildTimeline } from './diff.js';
 import { newPatient } from './schema.js';
 
 describe('computeTriage', () => {
@@ -56,6 +56,31 @@ describe('commitPatient', () => {
     const before = JSON.stringify(p);
     commitPatient(p, [{ field: 'na', new: 120, apply: false }]);
     expect(JSON.stringify(p)).toBe(before);
+  });
+});
+
+describe('buildTimeline', () => {
+  it('returns rows newest-first with per-day changes from diffSnapshots', () => {
+    const p = newPatient({ snapshots: [
+      { date: '06/14', na: 136 },
+      { date: '06/15', na: 134 },
+      { date: '06/16', na: 128 },
+    ] });
+    const tl = buildTimeline(p);
+    expect(tl.map((r) => r.snapshot.date)).toEqual(['06/16', '06/15', '06/14']);
+    expect(tl[0].changes).toEqual(diffSnapshots({ na: 134 }, { na: 128 }));
+    expect(tl[0].changes[0]).toMatchObject({ field: 'Na', from: 134, to: 128, delta: -6 });
+  });
+  it('marks the oldest snapshot as the baseline with no changes', () => {
+    const p = newPatient({ snapshots: [{ date: '06/15', na: 138 }, { date: '06/16', na: 137 }] });
+    const tl = buildTimeline(p);
+    expect(tl[1]).toMatchObject({ baseline: true });
+    expect(tl[1].changes).toEqual([]);
+    expect(tl[0].baseline).toBe(false);
+  });
+  it('handles a single snapshot and an empty history', () => {
+    expect(buildTimeline(newPatient({ snapshots: [{ date: '06/16', na: 140 }] }))).toHaveLength(1);
+    expect(buildTimeline(newPatient({}))).toEqual([]);
   });
 });
 

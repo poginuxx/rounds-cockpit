@@ -12,7 +12,7 @@
 import * as store from './lib/store.js';
 import { deidentify } from './lib/deid.js';
 import { parseUpdate } from './lib/parser.js';
-import { commitPatient, buildDigest } from './lib/diff.js';
+import { commitPatient, buildDigest, buildTimeline } from './lib/diff.js';
 import { newPatient, seedPatients, HOSPITALS } from './lib/schema.js';
 
 // ---- where your model API key would come from (kept null = offline parsing) ----
@@ -180,7 +180,60 @@ function openCard(id) {
     <div class="act" onclick="toast('Progress note saved','✓')"><span class="ai">▤</span><span class="at">Save note</span></div>`;
   $('scrim').classList.add('show'); $('sheet').classList.add('show');
 }
-function closeCard() { $('scrim').classList.remove('show'); $('sheet').classList.remove('show'); state.currentId = null; }
+function closeCard() { closeTimeline(); $('scrim').classList.remove('show'); $('sheet').classList.remove('show'); state.currentId = null; }
+
+// ============================ Patient timeline ============================
+// Read-only admission history. All trajectory/diff logic lives in lib/diff.js;
+// this only renders the rows it returns.
+const naCls = (v) => (v == null ? '' : v < 135 ? 'bad' : v < 137 ? 'warn' : '');
+
+function openTimeline() {
+  const p = state.byId[state.currentId]; if (!p) return;
+  $('tlName').textContent = p.name;
+  $('tlDx').textContent = `${p.dx} · Day ${p.day}${p.detail ? ' · ' + p.detail : ''}`;
+  $('tlLoc').textContent = `${p.hospital.toUpperCase()} · RM ${p.room}`;
+
+  const rows = buildTimeline(p);                       // newest-first
+  const naSeries = (p.snapshots || []).map((s) => s.na).filter((v) => v != null);
+  const last = naSeries[naSeries.length - 1];
+  const span = rows.length ? `${rows[rows.length - 1].snapshot.date} → ${rows[0].snapshot.date}` : '';
+  $('tlTrend').innerHTML = `
+    <div class="labcell wide">
+      <div class="lh"><span class="nm">Sodium · admission trend</span>${last != null ? `<span class="val ${naCls(last)}">${last}<small> mmol/L</small></span>` : ''}</div>
+      ${naSeries.length >= 2 ? `<div class="spark">${sparkline(naSeries)}</div>
+      <div class="sparkrow"><span class="seq">${esc(span)}</span><span class="seq">band 135–145</span></div>` :
+        `<div class="seq mono" style="font-size:11px;color:var(--faint);margin-top:6px">one reading so far — trajectory builds as you commit nightly updates</div>`}
+    </div>`;
+
+  $('tlList').innerHTML = rows.length
+    ? rows.map((r, i) => timelineRow(r, i === 0)).join('')
+    : `<div class="in-empty">No history yet for this patient.</div>`;
+
+  $('scrim3').classList.add('show'); $('tlsheet').classList.add('show');
+}
+function closeTimeline() { $('scrim3').classList.remove('show'); $('tlsheet').classList.remove('show'); }
+
+function timelineRow(r, isNewest) {
+  const s = r.snapshot;
+  const chips = [];
+  if (s.na != null) chips.push(`<span class="vc ${naCls(s.na)}">Na ${s.na}</span>`);
+  if (s.rr != null) chips.push(`<span class="vc ${s.rr >= 24 ? 'bad' : s.rr >= 22 ? 'warn' : ''}">RR ${s.rr}</span>`);
+  if (s.spo2 != null) chips.push(`<span class="vc ${s.spo2 < 94 ? 'bad' : s.spo2 < 96 ? 'warn' : ''}">SpO₂ ${s.spo2}%</span>`);
+  if (s.temp != null) chips.push(`<span class="vc ${s.temp >= 38 ? 'warn' : ''}">T ${s.temp}</span>`);
+
+  let chg;
+  if (r.baseline) chg = `<div class="tlchg base">admission baseline</div>`;
+  else if (!r.changes.length) chg = `<div class="tlchg base">no change vs prior day</div>`;
+  else chg = `<div class="tlchg">${r.changes.map(fmtChange).join(' · ')}</div>`;
+
+  return `<div class="tlrow${isNewest ? ' new' : ''}"><div class="tldate">${esc(s.date)}</div>
+    <div class="tlbody"><div class="tlchips">${chips.join('')}</div>${chg}</div></div>`;
+}
+function fmtChange(c) {
+  const dir = c.delta < 0 ? 'dn' : 'up';
+  const arr = c.delta < 0 ? '↓' : '↑';
+  return `${esc(c.field)} ${c.from} → ${c.to} <span class="${dir}">(${arr}${Math.abs(c.delta)})</span>`;
+}
 
 async function pick(ai, oi) {
   const p = state.byId[state.currentId]; if (!p) return;
@@ -309,7 +362,7 @@ let tt;
 function toast(m, ok) { const t = $('toast'); t.innerHTML = (ok ? `<span class="ok">${ok}</span>` : '') + m; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 1800); }
 
 // ---- expose handlers for inline onclick in index.html ----
-Object.assign(window, { lockApp, goTab, openCard, closeCard, pick, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, resetDemo, toast });
+Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, closeTimeline, pick, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, resetDemo, toast });
 
 // ---- register the PWA service worker (added by vite-plugin-pwa on build) ----
 if ('serviceWorker' in navigator) {

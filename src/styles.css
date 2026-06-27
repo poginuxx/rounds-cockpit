@@ -110,6 +110,23 @@ body{font-family:'IBM Plex Sans',system-ui,sans-serif;
 .rc-head .dx{font-size:13px;color:var(--muted);margin-top:3px}
 .rc-head .loc{font-family:'IBM Plex Mono';font-size:11px;color:var(--faint);margin-top:6px}
 .rc-close{width:30px;height:30px;border-radius:50%;background:var(--card);border:1px solid var(--line);font-size:16px;color:var(--muted);cursor:pointer;flex:0 0 30px;line-height:1}
+.rc-actions{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+.rc-tl{display:flex;align-items:center;gap:5px;height:30px;padding:0 12px;border-radius:15px;background:var(--teal-soft);border:1px solid var(--teal-soft);color:var(--teal-d);font-family:'IBM Plex Sans';font-size:12px;font-weight:600;cursor:pointer;line-height:1}
+.rc-tl span{font-size:12px}
+
+/* timeline sheet (read-only admission history) */
+#scrim3{z-index:22}#tlsheet{z-index:23}
+.tlrow{display:flex;gap:11px;background:var(--card);border:1px solid var(--line);border-radius:13px;padding:11px 12px;margin-bottom:8px}
+.tlrow.new{border-color:var(--teal);box-shadow:0 0 0 1px var(--teal-soft)}
+.tlrow .tldate{font-family:'IBM Plex Mono';font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--ink2);flex:0 0 46px;padding-top:2px}
+.tlrow .tlbody{flex:1;min-width:0}
+.tlchips{display:flex;flex-wrap:wrap;gap:6px}
+.tlchips .vc{font-family:'IBM Plex Mono';font-size:11px;color:var(--ink2);background:var(--card2);border:1px solid var(--line2);border-radius:7px;padding:2px 7px}
+.tlchips .vc.bad{color:var(--red);background:var(--red-soft);border-color:var(--red-soft)}
+.tlchips .vc.warn{color:var(--amber);background:var(--amber-soft);border-color:var(--amber-soft)}
+.tlchg{font-size:11.5px;color:var(--muted);margin-top:6px;line-height:1.45}
+.tlchg .up{color:var(--red)}.tlchg .dn{color:var(--green)}
+.tlchg.base{color:var(--faint);font-style:italic}
 .scorebar{display:flex;gap:8px;margin-top:12px}
 .score{flex:1;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 10px}
 .score .lbl{font-family:'IBM Plex Mono';font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
