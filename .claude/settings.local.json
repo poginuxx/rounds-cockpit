@@ -6,7 +6,11 @@
       "Bash(git commit *)",
       "Bash(npm test *)",
       "Bash(npm run *)",
-      "Bash(pkill -f vite)"
+      "Bash(pkill -f vite)",
+      "Bash(npm install *)",
+      "Bash(git -C /Users/francisgeraldlopez/Desktop/PhysicianCockpit/rounds-cockpit status)",
+      "Bash(git -C /Users/francisgeraldlopez/Desktop/PhysicianCockpit/rounds-cockpit diff --stat)",
+      "Bash(git -C /Users/francisgeraldlopez/Desktop/PhysicianCockpit/rounds-cockpit diff .claude/settings.local.json)"
     ]
   }
 }
