@@ -85,6 +85,7 @@ function show(id) {
   document.querySelectorAll('.screen').forEach((s) => s.classList.remove('active'));
   $(id).classList.add('active');
   document.querySelector('.tabbar').style.display = id === 'lock' ? 'none' : 'flex';
+  $('addFab').style.display = id === 'today' ? 'flex' : 'none';
 }
 function goTab(id) {
   show(id);

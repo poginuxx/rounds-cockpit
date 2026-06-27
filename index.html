@@ -42,7 +42,6 @@
         <div class="demo-banner"><span>⚠</span><div><b>Foundation demo.</b> Seeded sample patients — don't enter real ones until the full app is built.</div></div>
         <div id="list"></div>
         <div style="height:20px"></div>
-        <button class="fab" onclick="openAdd()" style="bottom:86px">＋ Add</button>
       </section>
 
       <!-- INTAKE -->
@@ -65,6 +64,9 @@
         <button class="resetbtn" onclick="resetDemo()" style="margin-top:24px">reset demo data</button>
       </section>
     </div>
+
+    <!-- add-patient FAB — pinned to the phone frame so it stays put while Today scrolls -->
+    <button class="fab" id="addFab" onclick="openAdd()" style="display:none">＋ Add</button>
 
     <!-- tab bar -->
     <div class="tabbar">
