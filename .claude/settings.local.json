@@ -17,7 +17,9 @@
       "Bash(git -C /Users/francisgeraldlopez/Desktop/PhysicianCockpit/rounds-cockpit show HEAD:src/styles.css)",
       "Bash(git reset *)",
       "Bash(git restore *)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(npx vitest *)",
+      "Bash(grep -n \"const esc\\\\|function esc\\\\|const \\\\$ \\\\|const \\\\$=\\\\|function \\\\$\\\\|jsq\" src/main.js)"
     ]
   }
 }
