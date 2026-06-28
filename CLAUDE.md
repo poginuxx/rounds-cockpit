@@ -111,7 +111,41 @@ npm run build    # -> dist/
     recent seizure deliberately does NOT feed `computeTriage` (decision: triage
     left untouched for now); if wired later, do it via a derived `seizures.js`
     helper so triage stays derived, never authored.
-  - stroke clock — still to build, inside the same section.
+  - **Stroke clock** — ✅ DONE. Own collapsible block in the Neuro section; when a
+    clock is active AND any window is still open it surfaces PROMINENTLY (expanded,
+    teal-accented `.sc-live`), else it sits collapsed. A live count-up (HH:MM:SS,
+    `setInterval` in `main.js`, recomputed from timestamps each tick — no drift)
+    shows time elapsed since LAST KNOWN WELL. All time/window maths is pure & tested
+    in `lib/strokeclock.js` (`now` injectable): `elapsedMs`, `windowStatus`,
+    `anyWindowOpen`, `formatHMS`, plus editable `DEFAULT_STROKE_WINDOWS`
+    (IV 270min/4.5h, MT 360min/6h, MT-extended 1440min/24h). Schema:
+    `strokeClock:null` until activated → `{ lastKnownWell, onsetDiscovered|null,
+    type, windows[] }`. Seed: the ischemic MCA-infarct patient (Aurora) carries an
+    ACTIVE clock anchored ~5h before Date.now() (illustrative) → IV PASSED, MT/MT-24h
+    open. The interval is cleared in `closeCard()` AND `lockApp()` — no leaked timers.
+    SAFETY PROPERTIES — pin these; a future change must NOT erode them:
+      * REFERENCE, NOT RECOMMENDATION. It states elapsed time + configured window
+        thresholds only. It must NEVER say to give/withhold a treatment or imply
+        eligibility — eligibility depends on imaging, contraindications, NIHSS, BP,
+        glucose and more this clock does not assess. Wording stays factual ("window
+        passed", never "(no longer) eligible").
+      * The anchor is LAST KNOWN WELL, never symptom-discovery and NEVER admission
+        time. Physician-activated only; nothing infers/auto-anchors it. A future
+        change must not quietly anchor it to admission/parsed/automated data, nor
+        auto-activate it. `onsetDiscovered` is documentation only — never used in
+        any elapsed/window calculation.
+      * Treatment windows render ONLY for confirmed ischemic. `windowStatus` returns
+        [] for hemorrhagic (thrombolysis contraindicated — show elapsed only, note
+        N/A) and for undetermined (windows pending type confirmation, not active).
+      * Threshold crossing is EXACT: at 270min (4:30:00) the IV window is passed;
+        4:29:59 is not (`strokeclock.test.js` pins the boundary). LKW unset →
+        "last known well not set", no countdown — never a zero or a guess.
+      * Windows are EDITABLE config (defaults the physician confirms vs protocol),
+        not immutable truth. The in-UI per-window editor is deferred; the config is
+        already editable in the record. The ONLY writer of `strokeClock` is the
+        activation form (physician-set).
+    With this, all four neuro modules (ribbons, motor grid, seizure log, stroke
+    clock) are complete.
 - **Commute / prep mode** — calm read-only overnight diff.
 - **Settings** — store the model API key in the encrypted vault and wire `getApiKey` in
   `main.js` to it (currently returns null → offline parser). See README "Cloud parsing".
