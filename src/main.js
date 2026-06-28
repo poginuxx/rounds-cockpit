@@ -19,6 +19,9 @@ import {
   SEIZURE_TYPES, FEATURES, TRIGGERS, summary as seizureSummary,
   isStatusEpilepticus, formatDuration, formatInterval,
 } from './lib/seizures.js';
+import {
+  defaultWindows, elapsedMs, windowStatus, anyWindowOpen, formatHMS,
+} from './lib/strokeclock.js';
 
 // ---- where your model API key would come from (kept null = offline parsing) ----
 // To enable the cloud parser, store the key in the encrypted vault and return it
@@ -81,7 +84,7 @@ async function enterApp() {
   show('today'); renderToday();
   if ($('rawText') && !$('rawText').value) $('rawText').value = SAMPLE;
 }
-function lockApp() { store.lock(); entered = ''; $('lockHint').textContent = ''; bootLock(); show('lock'); }
+function lockApp() { clearClockTimer(); store.lock(); entered = ''; $('lockHint').textContent = ''; bootLock(); show('lock'); }
 
 async function loadPatients() {
   state.patients = await store.allPatients();
@@ -191,8 +194,9 @@ function openCard(id) {
     <div class="act" onclick="toast('Progress note saved','✓')"><span class="ai">▤</span><span class="at">Save note</span></div>`;
   renderNeuro(p);
   $('scrim').classList.add('show'); $('sheet').classList.add('show');
+  startClockTimer();                    // live stroke-clock tick (no-op if no active clock)
 }
-function closeCard() { closeTimeline(); $('scrim').classList.remove('show'); $('sheet').classList.remove('show'); state.currentId = null; }
+function closeCard() { clearClockTimer(); closeTimeline(); $('scrim').classList.remove('show'); $('sheet').classList.remove('show'); state.currentId = null; }
 
 function renderScores(p) {
   $('rcScores').innerHTML = p.scores.map((s) => `
@@ -206,8 +210,8 @@ function renderScores(p) {
 // first module living inside it is the GCS / NIHSS trend ribbons.
 const STATUS_COL = { good: 'var(--teal)', warn: 'var(--amber)', bad: 'var(--red)' };
 
-function expandable(title, sub, bodyHtml, open = false) {
-  return `<details class="nblock"${open ? ' open' : ''}>
+function expandable(title, sub, bodyHtml, open = false, cls = '') {
+  return `<details class="nblock${cls ? ' ' + cls : ''}"${open ? ' open' : ''}>
     <summary><span class="ntag">${esc(title)}</span><span class="nsub">${esc(sub)}</span><span class="ncaret">▾</span></summary>
     <div class="nbody">${bodyHtml}</div></details>`;
 }
@@ -268,6 +272,7 @@ function renderNeuro(p) {
   }).filter(Boolean).join('');
   // The Neuro section is a stack of collapsible blocks (each its own .nblock).
   const blocks = [];
+  blocks.push(strokeClockBlock(p));      // stroke clock first — surfaces prominently when in-window
   if (ribbons) blocks.push(expandable('Neuro', 'GCS / NIHSS trend ribbons', `<div class="labgrid">${ribbons}</div>`));
   blocks.push(motorBlock(p));            // motor grid is always available (record a new exam)
   blocks.push(seizureBlock(p));          // seizure log (manual-entry-only)
@@ -585,6 +590,208 @@ async function saveSeizure() {
   toast('Seizure recorded', '✓');
 }
 
+// ---------------------------- stroke clock ----------------------------
+// Neuro module #4, inside its own collapsible block. A live count of time since
+// LAST KNOWN WELL against acute-stroke treatment windows — DECISION-SUPPORT
+// REFERENCE ONLY. All time/window maths is pure & tested in lib/strokeclock.js;
+// this file only renders and owns the live interval + its cleanup.
+//
+// SAFETY (mirrors lib/strokeclock.js — keep these true):
+//  · The anchor is LAST KNOWN WELL, never discovery/admission time. Physician-set
+//    only; nothing here infers or auto-activates it.
+//  · Windows render ONLY for confirmed ischemic (windowStatus returns [] for
+//    hemorrhagic and undetermined). Wording stays factual ("window passed"),
+//    never "(in)eligible" / "give|withhold". Eligibility is not assessed here.
+
+let clockTimer = null;          // the single live tick; cleared on close/lock (no leaks)
+let scDraft = null;             // activation form's in-progress type selection
+
+function clearClockTimer() { if (clockTimer) { clearInterval(clockTimer); clockTimer = null; } }
+
+// Start ticking only when the open patient has an active clock with an anchor.
+// Recompute from timestamps each tick — never accumulate, so there is no drift.
+function startClockTimer() {
+  clearClockTimer();
+  const p = state.byId[state.currentId];
+  if (p && p.strokeClock && p.strokeClock.lastKnownWell) clockTimer = setInterval(tickStrokeClock, 1000);
+}
+function tickStrokeClock() {
+  const p = state.byId[state.currentId];
+  const body = $('strokeBody');
+  if (!p || !p.strokeClock || !body) { clearClockTimer(); return; }
+  const now = Date.now();
+  body.innerHTML = strokeBodyHtml(p, now);
+  const sub = body.closest('.nblock')?.querySelector('.nsub');
+  if (sub) sub.textContent = strokeSub(p.strokeClock, now);
+}
+
+// Collapsed-header glance. When active + a window is open the block is expanded
+// (see strokeClockBlock), so this mainly serves the non-urgent collapsed states.
+function strokeSub(c, now) {
+  const el = elapsedMs(c, now);
+  if (el == null) return 'last known well not set';
+  const hms = formatHMS(el);
+  if (c.type === 'ischemic') {
+    const open = windowStatus(c, now).filter((w) => !w.passed).length;
+    return open ? `${hms} since LKW · ${open} window${open > 1 ? 's' : ''} open` : `${hms} since LKW · all windows passed`;
+  }
+  if (c.type === 'hemorrhagic') return `${hms} since LKW · windows N/A`;
+  return `${hms} since LKW · windows pending type`;
+}
+
+function strokeClockBlock(p) {
+  const c = p.strokeClock;
+  if (!c) {
+    // OFF — a small, collapsed activation entry (physician-set, never automatic).
+    return expandable('Stroke clock', 'not active',
+      `<div class="sc-off">
+         <div class="sc-offnote">Off. Activate by entering last known well and stroke type — never inferred from admission or parsed data.</div>
+         <div class="sctools"><button class="mtool primary" onclick="openStrokeForm()">Activate stroke clock</button></div>
+       </div>`);
+  }
+  const now = Date.now();
+  const open = anyWindowOpen(c, now);   // prominent + expanded while any window is still open
+  return expandable('Stroke clock', strokeSub(c, now),
+    `<div id="strokeBody">${strokeBodyHtml(p, now)}</div>`, open, open ? 'sc-live' : '');
+}
+
+const fmtClockTime = (iso) => {
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? '—'
+    : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+function strokeBodyHtml(p, now) {
+  const c = p.strokeClock;
+  const el = elapsedMs(c, now);
+  const tools = `<div class="sctools">
+      <button class="mtool" onclick="openStrokeForm()">Edit</button>
+      <button class="mtool" onclick="deactivateStrokeClock()">Turn off</button></div>`;
+
+  // Never fabricate a time: no anchor → no countdown, an explicit message instead.
+  if (el == null) {
+    return `<div class="sc-noanchor">Last known well not set — no countdown shown.</div>${tools}`;
+  }
+
+  const anchor = `<div class="sc-anchor">since last known well · <b>${esc(fmtClockTime(c.lastKnownWell))}</b></div>`;
+  const countup = `<div class="sc-elapsed"><span class="sc-hms">${formatHMS(el)}</span><span class="sc-unit">elapsed</span></div>`;
+  const disc = c.onsetDiscovered
+    ? `<div class="sc-disc">symptom discovery · ${esc(fmtClockTime(c.onsetDiscovered))} <small>(documentation only — not the clock anchor)</small></div>`
+    : '';
+
+  // Type-specific body. Windows ONLY for confirmed ischemic.
+  let windowsHtml;
+  if (c.type === 'ischemic') {
+    const rows = windowStatus(c, now).map((w) => {
+      const tag = w.kind === 'extended' ? '<span class="sc-ext">selected-patient</span>' : '';
+      const state = w.passed
+        ? `<span class="sc-passed">window passed</span>`
+        : `<span class="sc-left">${formatHMS(w.remainingMs)} left</span>`;
+      return `<div class="sc-win${w.passed ? ' is-passed' : ' is-open'}">
+          <div class="sc-wh"><span class="sc-wlabel">${esc(w.label)} <small>${(w.minutes / 60)}h</small> ${tag}</span>${state}</div>
+          <div class="sc-wnote">${esc(w.note)}</div></div>`;
+    }).join('');
+    windowsHtml = `<div class="sc-wintitle">Treatment windows · reference thresholds, not eligibility</div>${rows}`;
+  } else if (c.type === 'hemorrhagic') {
+    windowsHtml = `<div class="sc-na">Haemorrhagic — thrombolysis/thrombectomy windows not applicable (thrombolysis is contraindicated in haemorrhage). Elapsed time shown for documentation.</div>`;
+  } else {
+    windowsHtml = `<div class="sc-na">Stroke type not yet confirmed — treatment windows pending. They are not active until the type is confirmed ischemic.</div>`;
+  }
+
+  const typeLabel = { ischemic: 'Ischemic', hemorrhagic: 'Haemorrhagic', undetermined: 'Undetermined' }[c.type] || c.type;
+  return `${anchor}${countup}${disc}
+    <div class="sc-type">type · <b>${esc(typeLabel)}</b></div>
+    ${windowsHtml}
+    <div class="sc-disclaimer">Reference only — not a treatment recommendation. Eligibility depends on imaging, contraindications, NIHSS, BP, glucose and more that this clock does not assess. Confirm windows against your current protocol.</div>
+    ${tools}`;
+}
+
+// ----- Activation form (the ONLY writer of strokeClock; physician-set) -----
+const SC_TYPES = [
+  { id: 'ischemic', label: 'Ischemic' },
+  { id: 'hemorrhagic', label: 'Haemorrhagic' },
+  { id: 'undetermined', label: 'Undetermined' },
+];
+
+function openStrokeForm() {
+  const p = state.byId[state.currentId];
+  if (!p) return;
+  const c = p.strokeClock;
+  scDraft = { type: c ? c.type : null };
+  $('scsheet').innerHTML = scFormHtml(c);
+  $('scsheet').classList.add('show');
+  $('scScrim').classList.add('show');
+}
+function closeStrokeForm() {
+  $('scsheet').classList.remove('show');
+  $('scScrim').classList.remove('show');
+  scDraft = null;
+}
+
+// datetime-local default: prefill from an existing ISO, else now.
+function isoToLocalInput(iso) {
+  const d = iso ? new Date(iso) : new Date();
+  if (isNaN(d.getTime())) return nowLocalDatetime();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function scFormHtml(c) {
+  const types = SC_TYPES.map((t) =>
+    chip(t.label, scDraft.type === t.id, `scPickType(this,'${t.id}')`)).join('');
+  return `
+    <div class="grab"></div>
+    <h2>${c ? 'Edit stroke clock' : 'Activate stroke clock'}</h2>
+    <div class="lead">Physician-set. The anchor is <b>last known well</b> — for wake-up / unwitnessed onset this is when the patient was last seen normal (e.g. before sleep), not when symptoms were discovered. Never inferred from admission time.</div>
+    <div class="form">
+      <div class="field"><label>Last known well (date &amp; time) *</label>
+        <input type="datetime-local" id="sc_lkw" value="${isoToLocalInput(c ? c.lastKnownWell : '')}"></div>
+      <div class="field"><label>Symptom discovery / onset (optional)</label>
+        <input type="datetime-local" id="sc_disc" value="${c && c.onsetDiscovered ? isoToLocalInput(c.onsetDiscovered) : ''}">
+        <div class="hint">Documentation only — never used as the countdown anchor.</div></div>
+      <div class="field"><label>Stroke type *</label><div class="szchips" id="sc_types">${types}</div>
+        <div class="hint">Treatment windows show ONLY for confirmed ischemic. Haemorrhagic shows elapsed time without windows; undetermined marks them pending.</div></div>
+    </div>
+    <div class="formbtns">
+      <button class="btn ghost" onclick="closeStrokeForm()">Cancel</button>
+      <button class="btn primary" onclick="saveStrokeClock()">Encrypt &amp; save</button>
+    </div>`;
+}
+
+function scPickType(el, id) { scDraft.type = id; szGroupSelect(el); }
+
+async function saveStrokeClock() {
+  const p = state.byId[state.currentId];
+  if (!p || !scDraft) return;
+  const lkwRaw = $('sc_lkw').value;
+  if (!lkwRaw) { toast('Last known well is required'); return; }
+  if (!scDraft.type) { toast('Stroke type is required'); return; }
+  const discRaw = $('sc_disc').value;
+  const existing = p.strokeClock;
+  p.strokeClock = {
+    lastKnownWell: new Date(lkwRaw).toISOString(),
+    onsetDiscovered: discRaw ? new Date(discRaw).toISOString() : null,
+    type: scDraft.type,
+    // Preserve any edited window config; seed defaults on first activation.
+    windows: existing && existing.windows ? existing.windows : defaultWindows(),
+  };
+  await store.savePatient(p);            // encrypted vault — invariant #2
+  closeStrokeForm();
+  renderNeuro(p);                        // rebuild (recomputes prominent/expanded state)
+  startClockTimer();                     // (re)start the live tick
+  toast('Stroke clock activated', '✓');
+}
+
+async function deactivateStrokeClock() {
+  const p = state.byId[state.currentId];
+  if (!p) return;
+  p.strokeClock = null;
+  await store.savePatient(p);
+  clearClockTimer();
+  renderNeuro(p);
+  toast('Stroke clock turned off', '✓');
+}
+
 // ============================ Patient timeline ============================
 // Read-only admission history. All trajectory/diff logic lives in lib/diff.js;
 // this only renders the rows it returns.
@@ -763,7 +970,7 @@ let tt;
 function toast(m, ok) { const t = $('toast'); t.innerHTML = (ok ? `<span class="ok">${ok}</span>` : '') + m; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 1800); }
 
 // ---- expose handlers for inline onclick in index.html ----
-Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, closeTimeline, pick, neuroStep, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, resetDemo, toast, motorPick, motorSet, motorSetAll5, motorRecord, closeMpick, openSeizureForm, closeSeizureForm, saveSeizure, szPickType, szPickTrigger, szToggleFeature, szSetWitnessed, szSetResponded });
+Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, closeTimeline, pick, neuroStep, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, resetDemo, toast, motorPick, motorSet, motorSetAll5, motorRecord, closeMpick, openSeizureForm, closeSeizureForm, saveSeizure, szPickType, szPickTrigger, szToggleFeature, szSetWitnessed, szSetResponded, openStrokeForm, closeStrokeForm, saveStrokeClock, scPickType, deactivateStrokeClock });
 
 // ---- register the PWA service worker (added by vite-plugin-pwa on build) ----
 if ('serviceWorker' in navigator) {

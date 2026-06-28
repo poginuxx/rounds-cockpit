@@ -5,6 +5,8 @@
  * If you change the shape, change it HERE and update the tests.
  */
 
+import { defaultWindows } from './strokeclock.js';
+
 /** Create an empty patient with sane defaults. */
 export function newPatient(fields = {}) {
   return {
@@ -33,6 +35,13 @@ export function newPatient(fields = {}) {
                            //   trigger, rescueMed, rescueResponded:bool|null, witnessed:bool,
                            //   note }] — APPEND-ONLY, manual-entry-only (see lib/seizures.js).
                            //   Never written by the parser or the Ask toggle, by design.
+    strokeClock: null,     // OFF until the physician activates it (neuro module #4).
+                           //   When active: { lastKnownWell (ISO), onsetDiscovered
+                           //   (ISO|null), type:'ischemic'|'hemorrhagic'|'undetermined',
+                           //   windows:[{ id, label, minutes, kind, note }] }. The anchor
+                           //   is LAST KNOWN WELL — never inferred from admission/parsed/
+                           //   automated data. Treatment windows are reference thresholds,
+                           //   NOT eligibility (see lib/strokeclock.js). Physician-set only.
     ...fields,
   };
 }
@@ -149,7 +158,14 @@ export function seedPatients() {
           'LL.hipFlex.L':'5','LL.kneeExt.L':'5','LL.kneeFlex.L':'5','LL.ankleDorsi.L':'5','LL.anklePlantar.L':'5',
           'UL.shoulderAbd.R':'4-','UL.elbowFlex.R':'4-','UL.elbowExt.R':'3','UL.wristExt.R':'3','UL.fingerAbd.R':'2',
           'LL.hipFlex.R':'3','LL.kneeExt.R':'4-','LL.kneeFlex.R':'4-','LL.anklePlantar.R':'4' } },
-      ] },
+      ],
+      // ISCHEMIC stroke clock, physician-activated. Last known well is anchored
+      // ~5 h before now so the demo shows the MIX of states the module is for:
+      // IV 4.5 h PASSED, MT 6 h still open (~1 h left), MT-24 h open. The value is
+      // ILLUSTRATIVE ONLY — a genuine Day-3 admission would not be acutely in-window;
+      // this is a seed so the live count-up + window states render on first open.
+      strokeClock:{ lastKnownWell:hoursAgoISO(5), onsetDiscovered:hoursAgoISO(2),
+        type:'ischemic', windows:defaultWindows() } },
 
     { id:'p_lourdes', name:'Lourdes Bautista', age:'72', sex:'F', dx:'Epilepsy, breakthrough GTC', day:'2', detail:'',
       hospital:'Gov. T. Sison Memorial', room:'215', triage:'g', newCount:0, overnight:null, ready:true,
