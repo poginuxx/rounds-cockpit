@@ -90,7 +90,28 @@ npm run build    # -> dist/
     "Set all 5/5" + a fast cell picker compose a draft; "Record exam" persists it
     encrypted and the prior exam becomes the trend baseline. Seed: the MCA-infarct
     patient (Aurora) carries two dated exams with contralateral right-sided weakness.
-  - seizure log, stroke clock — still to build, inside the same section.
+  - **Seizure log** — ✅ DONE. Own collapsible block, default collapsed. The
+    collapsed header is the one glanceable summary: "N seizure(s) today", else
+    "Seizure-free Xh/Xd" (interval from the most recent entry), else an explicit
+    "No seizures recorded" (null interval — NOT "0h", which means the opposite).
+    Records per event: onset (REAL ISO datetime), durationSec, type, optional
+    features[]/trigger/rescueMed/rescueResponded/witnessed/note. A single event
+    ≥ 5min (300s exactly) flags STATUS EPILEPTICUS. All derived numbers are pure
+    & tested in `lib/seizures.js` (`now` injectable); `main.js` only renders the
+    log + wires the form. Seed: the breakthrough-GTC patient (Lourdes) carries
+    two entries timestamped RELATIVE to Date.now() (~36h + ~9d ago).
+    MANUAL-ENTRY-ONLY BY DESIGN — the log is written EXCLUSIVELY by its own
+    Record-seizure form (`seizures[]` is assigned in exactly one place). The
+    intake parser's `seizure` field and the bedside "Any seizures?" Ask toggle
+    are fully decoupled and must NEVER append to it; a future change must not
+    quietly wire an automated append. The only bridge is a convenience shortcut:
+    when the Ask toggle reads "Yes", the block shows a one-tap button that OPENS
+    the empty form — the physician fills it, nothing is pre-filled. Entries are
+    append-only (no edit/delete path; a correction is a new entry). NOTE: a
+    recent seizure deliberately does NOT feed `computeTriage` (decision: triage
+    left untouched for now); if wired later, do it via a derived `seizures.js`
+    helper so triage stays derived, never authored.
+  - stroke clock — still to build, inside the same section.
 - **Commute / prep mode** — calm read-only overnight diff.
 - **Settings** — store the model API key in the encrypted vault and wire `getApiKey` in
   `main.js` to it (currently returns null → offline parser). See README "Cloud parsing".

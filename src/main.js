@@ -15,6 +15,10 @@ import { parseUpdate } from './lib/parser.js';
 import { commitPatient, buildDigest, buildTimeline, neuroStatus } from './lib/diff.js';
 import { newPatient, seedPatients, HOSPITALS } from './lib/schema.js';
 import { MUSCLE_GROUPS, REGIONS, SIDES, GRADES, NOT_TESTED, motorDelta, cellKey } from './lib/motor.js';
+import {
+  SEIZURE_TYPES, FEATURES, TRIGGERS, summary as seizureSummary,
+  isStatusEpilepticus, formatDuration, formatInterval,
+} from './lib/seizures.js';
 
 // ---- where your model API key would come from (kept null = offline parsing) ----
 // To enable the cloud parser, store the key in the encrypted vault and return it
@@ -27,6 +31,9 @@ window.setApiKey = (k) => { API_KEY = k; }; // for manual testing in the console
 const state = { patients: [], byId: {}, currentId: null, deid: null, review: [] };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+// Escape a string for safe interpolation inside a single-quoted inline JS arg
+// (e.g. onclick="f('...')") — chip labels include apostrophes ("Todd's paresis").
+const jsq = (s) => String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
 const SAMPLE = `Ramon dela Cruz rm 408 — repeat Na came back 126, still severe headache, no new weakness. BP 150/88, HR 80.
 Aurora Mendoza 412: moved bowels this morning, finally. BP 150/86, sleeping better.
@@ -263,6 +270,7 @@ function renderNeuro(p) {
   const blocks = [];
   if (ribbons) blocks.push(expandable('Neuro', 'GCS / NIHSS trend ribbons', `<div class="labgrid">${ribbons}</div>`));
   blocks.push(motorBlock(p));            // motor grid is always available (record a new exam)
+  blocks.push(seizureBlock(p));          // seizure log (manual-entry-only)
   $('rcNeuro').innerHTML = blocks.join('');
 }
 
@@ -388,6 +396,193 @@ async function neuroStep(label, d) {
   await store.savePatient(p);          // encrypted vault — invariant #2
   renderScores(p);                     // current value updates now…
   renderNeuro(p);                      // …ribbon point only moves after next commit
+}
+
+// ---------------------------- seizure log ----------------------------
+// Neuro module #3, inside its own collapsible block. MANUAL ENTRY ONLY: the log
+// is written EXCLUSIVELY through the Record-seizure form below. The intake
+// parser's `seizure` field and the bedside "Any seizures?" Ask toggle are fully
+// decoupled and never append here — that decoupling is a safety property. The
+// only allowed bridge is a convenience shortcut: when the Ask toggle reads "Yes"
+// we surface a one-tap button that OPENS the empty form; the physician fills it.
+// All derived numbers come from the pure, tested lib/seizures.js.
+
+// The collapsed header summary: today's count, else the seizure-free interval,
+// else an explicit "no seizures" (which is NOT the same as "0h").
+function seizureSub(entries) {
+  const s = seizureSummary(entries, Date.now());
+  if (s.freeIntervalSec == null) return 'No seizures recorded';
+  if (s.count24h > 0) return `${s.count24h} seizure${s.count24h > 1 ? 's' : ''} today`;
+  return `Seizure-free ${formatInterval(s.freeIntervalSec)}`;
+}
+
+function seizureBlock(p) {
+  return expandable('Seizures', seizureSub(p.seizures || []),
+    `<div id="seizBody">${seizureBodyHtml(p)}</div>`);
+}
+
+// Re-render just the block body (keeps the <details> open after recording) and
+// refresh the collapsed-header summary in place, without rebuilding the section.
+function refreshSeizures() {
+  const p = state.byId[state.currentId];
+  if (!p) return;
+  const body = $('seizBody');
+  if (!body) return;
+  body.innerHTML = seizureBodyHtml(p);
+  const sub = body.closest('.nblock')?.querySelector('.nsub');
+  if (sub) sub.textContent = seizureSub(p.seizures || []);
+}
+
+function seizureBodyHtml(p) {
+  const entries = [...(p.seizures || [])].sort(
+    (a, b) => Date.parse(b.onset) - Date.parse(a.onset)); // newest first
+  const askYes = /^yes$/i.test(askAns(p, 'Any seizure'));
+  const log = entries.length
+    ? entries.map(seizureRowHtml).join('')
+    : `<div class="sz-empty">No seizures recorded.</div>`;
+  return `
+    <div class="sztools">
+      <button class="mtool primary" onclick="openSeizureForm()">＋ Record seizure</button>
+      ${askYes ? `<button class="szshortcut" onclick="openSeizureForm()">Ask says “Yes” — log it</button>` : ''}
+    </div>
+    <div class="szlog">${log}</div>`;
+}
+
+function seizureRowHtml(e) {
+  const d = new Date(e.onset);
+  const when = isNaN(d.getTime()) ? '—'
+    : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const status = isStatusEpilepticus(e);
+  const feats = (e.features || []).join(' · ');
+  const meta = [];
+  if (e.trigger) meta.push('trigger: ' + e.trigger);
+  if (e.rescueMed) meta.push(e.rescueMed + (e.rescueResponded === true ? ' ✓ responded'
+    : e.rescueResponded === false ? ' ✗ no response' : ''));
+  meta.push(e.witnessed ? 'witnessed' : 'reported');
+  return `<div class="szrow">
+    <div class="szhd">
+      <span class="szwhen">${esc(when)}</span>
+      <span class="szdur">${esc(formatDuration(e.durationSec))}</span>
+      ${status ? '<span class="szse">status epilepticus</span>' : ''}</div>
+    <div class="sztype">${esc(e.type)}</div>
+    ${feats ? `<div class="szmeta">${esc(feats)}</div>` : ''}
+    <div class="szmeta">${esc(meta.join(' · '))}</div>
+    ${e.note ? `<div class="sznote">${esc(e.note)}</div>` : ''}</div>`;
+}
+
+// ----- Record-seizure form (the ONLY writer of seizures[]) -----
+// szDraft holds the in-progress entry's tap-selections (chip groups). Free-text
+// fields (onset, duration, rescue med, note) are read from the inputs on save, so
+// re-rendering chips never clobbers typed text. Nothing persists until "Save".
+let szDraft = null;
+
+// Local 'YYYY-MM-DDTHH:MM' for a datetime-local default of "now".
+function nowLocalDatetime() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function openSeizureForm() {
+  const p = state.byId[state.currentId];
+  if (!p) return;
+  szDraft = { type: null, features: new Set(), trigger: null, witnessed: true, responded: null };
+  $('seizsheet').innerHTML = seizFormHtml();
+  $('seizsheet').classList.add('show');
+  $('seizScrim').classList.add('show');
+}
+function closeSeizureForm() {
+  $('seizsheet').classList.remove('show');
+  $('seizScrim').classList.remove('show');
+  szDraft = null;
+}
+
+const chip = (label, on, handler) =>
+  `<button type="button" class="szchip${on ? ' on' : ''}" onclick="${handler}">${esc(label)}</button>`;
+
+function seizFormHtml() {
+  const types = SEIZURE_TYPES.map((t) => chip(t, szDraft.type === t, `szPickType(this,'${jsq(t)}')`)).join('');
+  const feats = FEATURES.map((f) => chip(f, szDraft.features.has(f), `szToggleFeature(this,'${jsq(f)}')`)).join('');
+  const trigs = TRIGGERS.map((t) => chip(t, szDraft.trigger === t, `szPickTrigger(this,'${jsq(t)}')`)).join('');
+  return `
+    <div class="grab"></div>
+    <h2>Record seizure</h2>
+    <div class="lead">Manual entry — append-only. Essentials are required; leave the rest blank if not observed (blanks are honest, never auto-filled).</div>
+    <div class="form">
+      <div class="frow">
+        <div class="field"><label>Onset (date &amp; time) *</label>
+          <input type="datetime-local" id="sz_onset" value="${nowLocalDatetime()}"></div>
+      </div>
+      <div class="field"><label>Duration *</label>
+        <div class="frow">
+          <div class="field"><input id="sz_min" inputmode="numeric" placeholder="min"></div>
+          <div class="field"><input id="sz_sec" inputmode="numeric" placeholder="sec"></div>
+        </div>
+        <div class="hint">≥ 5:00 flags status epilepticus.</div>
+      </div>
+      <div class="field"><label>Type *</label><div class="szchips" id="sz_types">${types}</div></div>
+      <div class="field"><label>Features</label><div class="szchips">${feats}</div></div>
+      <div class="field"><label>Likely trigger</label><div class="szchips">${trigs}</div></div>
+      <div class="field"><label>Rescue medication</label>
+        <input id="sz_rescue" placeholder="e.g. Lorazepam 4mg IV">
+        <div class="szchips" style="margin-top:7px">
+          ${chip('responded', szDraft.responded === true, 'szSetResponded(this,true)')}
+          ${chip('no response', szDraft.responded === false, 'szSetResponded(this,false)')}
+        </div>
+      </div>
+      <div class="field"><label>Source</label><div class="szchips">
+        ${chip('witnessed', szDraft.witnessed === true, 'szSetWitnessed(this,true)')}
+        ${chip('reported', szDraft.witnessed === false, 'szSetWitnessed(this,false)')}
+      </div></div>
+      <div class="field"><label>Note</label><textarea id="sz_note" rows="2" placeholder="free text (optional)"></textarea></div>
+    </div>
+    <div class="formbtns">
+      <button class="btn ghost" onclick="closeSeizureForm()">Cancel</button>
+      <button class="btn primary" onclick="saveSeizure()">Encrypt &amp; save</button>
+    </div>`;
+}
+
+// Chip handlers mutate szDraft + toggle classes (no re-render → text inputs kept).
+function szGroupSelect(el) {
+  [...el.parentElement.children].forEach((c) => c.classList.remove('on'));
+  el.classList.add('on');
+}
+function szPickType(el, t) { szDraft.type = t; szGroupSelect(el); }
+function szPickTrigger(el, t) { szDraft.trigger = szDraft.trigger === t ? null : t; el.classList.toggle('on', szDraft.trigger === t); if (szDraft.trigger === t) szGroupSelect(el); }
+function szToggleFeature(el, f) {
+  if (szDraft.features.has(f)) { szDraft.features.delete(f); el.classList.remove('on'); }
+  else { szDraft.features.add(f); el.classList.add('on'); }
+}
+function szSetWitnessed(el, b) { szDraft.witnessed = b; szGroupSelect(el); }
+function szSetResponded(el, v) { szDraft.responded = szDraft.responded === v ? null : v; el.classList.toggle('on', szDraft.responded === v); if (szDraft.responded === v) szGroupSelect(el); }
+
+async function saveSeizure() {
+  const p = state.byId[state.currentId];
+  if (!p || !szDraft) return;
+  const onsetRaw = $('sz_onset').value;
+  if (!onsetRaw) { toast('Onset date & time is required'); return; }
+  const onset = new Date(onsetRaw).toISOString();
+  const durationSec = (parseInt($('sz_min').value, 10) || 0) * 60 + (parseInt($('sz_sec').value, 10) || 0);
+  if (durationSec <= 0) { toast('Duration is required'); return; }
+  if (!szDraft.type) { toast('Seizure type is required'); return; }
+  const rescueMed = $('sz_rescue').value.trim() || null;
+  const entry = {
+    id: 'sz_' + Date.now(),
+    onset,
+    durationSec,
+    type: szDraft.type,
+    features: [...szDraft.features],
+    trigger: szDraft.trigger,                 // null when untapped — never defaulted
+    rescueMed,
+    rescueResponded: rescueMed ? szDraft.responded : null,
+    witnessed: szDraft.witnessed,
+    note: $('sz_note').value.trim(),
+  };
+  p.seizures = [...(p.seizures || []), entry];   // APPEND-ONLY — no edit/delete path
+  await store.savePatient(p);                    // encrypted vault — invariant #2
+  closeSeizureForm();
+  refreshSeizures();                             // header + log update immediately
+  toast('Seizure recorded', '✓');
 }
 
 // ============================ Patient timeline ============================
@@ -568,7 +763,7 @@ let tt;
 function toast(m, ok) { const t = $('toast'); t.innerHTML = (ok ? `<span class="ok">${ok}</span>` : '') + m; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 1800); }
 
 // ---- expose handlers for inline onclick in index.html ----
-Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, closeTimeline, pick, neuroStep, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, resetDemo, toast, motorPick, motorSet, motorSetAll5, motorRecord, closeMpick });
+Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, closeTimeline, pick, neuroStep, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, resetDemo, toast, motorPick, motorSet, motorSetAll5, motorRecord, closeMpick, openSeizureForm, closeSeizureForm, saveSeizure, szPickType, szPickTrigger, szToggleFeature, szSetWitnessed, szSetResponded });
 
 // ---- register the PWA service worker (added by vite-plugin-pwa on build) ----
 if ('serviceWorker' in navigator) {

@@ -1,9 +1,47 @@
 import { describe, it, expect } from 'vitest';
 import { newPatient, seedPatients } from './schema.js';
+import { summary } from './seizures.js';
 
 describe('newPatient', () => {
   it('starts with an empty snapshots array', () => {
     expect(newPatient().snapshots).toEqual([]);
+  });
+  it('starts with an empty seizures array', () => {
+    expect(newPatient().seizures).toEqual([]);
+  });
+});
+
+describe('seedPatients seizure log', () => {
+  const seeds = seedPatients();
+  const lourdes = seeds.find((p) => p.id === 'p_lourdes');
+
+  it('only the breakthrough-GTC patient carries seeded seizures', () => {
+    for (const p of seeds) {
+      expect(Array.isArray(p.seizures)).toBe(true);
+      if (p.id !== 'p_lourdes') expect(p.seizures).toEqual([]);
+    }
+    expect(lourdes.seizures.length).toBe(2);
+  });
+
+  it('uses real ISO datetimes (not the app fake date strings)', () => {
+    for (const e of lourdes.seizures) {
+      expect(Number.isNaN(Date.parse(e.onset))).toBe(false);
+      expect(e.onset).toMatch(/^\d{4}-\d{2}-\d{2}T/); // ISO, not '06/17'
+    }
+  });
+
+  it('the most recent seed seizure is ~36h ago so the summary reads in hours', () => {
+    const s = summary(lourdes.seizures, Date.now());
+    const hours = s.freeIntervalSec / 3600;
+    expect(hours).toBeGreaterThan(35);
+    expect(hours).toBeLessThan(37);
+  });
+
+  it('does not auto-fill optional clinical fields (trigger absent stays null)', () => {
+    const focal = lourdes.seizures.find((e) => e.type === 'focal impaired awareness');
+    expect(focal.trigger).toBeNull();
+    expect(focal.witnessed).toBe(false); // reported, not witnessed
+    expect(focal.rescueMed).toBeNull();
   });
 });
 

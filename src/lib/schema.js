@@ -29,6 +29,10 @@ export function newPatient(fields = {}) {
     motorExams: [],        // [{ date, cells:{ 'UL.shoulderAbd.R':'4', ... } }] — MRC grid.
                            //   cell values are strings ('0'..'5','4-','4+'); an ABSENT
                            //   key means NOT TESTED (never auto-filled to a normal score).
+    seizures: [],          // [{ id, onset (ISO datetime), durationSec, type, features:[],
+                           //   trigger, rescueMed, rescueResponded:bool|null, witnessed:bool,
+                           //   note }] — APPEND-ONLY, manual-entry-only (see lib/seizures.js).
+                           //   Never written by the parser or the Ask toggle, by design.
     ...fields,
   };
 }
@@ -78,6 +82,15 @@ function stepBack({ mm, dd }, days) {
   const d = new Date(2026, mm - 1, dd);
   d.setDate(d.getDate() - days);
   return String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0');
+}
+
+/**
+ * ISO datetime `hours` before now. Seed seizures use this (not the app's fake
+ * '06/17' date strings) so the "Seizure-free Xh" interval stays realistic
+ * whenever the app is opened — see lib/seizures.js.
+ */
+function hoursAgoISO(hours) {
+  return new Date(Date.now() - hours * 3600 * 1000).toISOString();
 }
 
 /** Hospitals in physical round order. Editable per user. */
@@ -151,7 +164,22 @@ export function seedPatients() {
       vitals:[['BP','124/78'],['HR','68'],['RR','15'],['TEMP','36.6'],['SPO₂','99%']],
       meds:[{n:'Levetiracetam',d:'1g BID',day:'D2',w:false},{n:'Folic acid',d:'5mg OD',day:'D2',w:false}],
       doMain:{t:'Generate PhilHealth packet',s:'ready for discharge',bill:true},
-      snapshots:[{date:'06/16',na:140}] },
+      snapshots:[{date:'06/16',na:140}],
+      // Breakthrough-GTC patient: a manually-logged seizure history, timestamped
+      // RELATIVE to now so "Seizure-free ~36h" renders whenever the app opens.
+      // The earlier focal event was reported by family (not witnessed) and carries
+      // no trigger (absent → unknown, never auto-filled). These are seed examples
+      // of MANUAL entries; nothing automated appends here.
+      seizures:[
+        { id:'sz_lourdes_1', onset:hoursAgoISO(24*9), durationSec:40,
+          type:'focal impaired awareness', features:['automatisms'], trigger:null,
+          rescueMed:null, rescueResponded:null, witnessed:false, note:'reported by family' },
+        { id:'sz_lourdes_2', onset:hoursAgoISO(36), durationSec:95,
+          type:'generalized tonic-clonic',
+          features:['post-ictal confusion','tongue bite','incontinence'],
+          trigger:'missed meds', rescueMed:'Lorazepam 4mg IV', rescueResponded:true,
+          witnessed:true, note:'breakthrough GTC at home' },
+      ] },
 
     { id:'p_efren', name:'Efren Villaraza', age:'45', sex:'M', dx:'Guillain-Barré', day:'6', detail:'',
       hospital:'Nazareth General Hospital', room:'302', triage:'a', newCount:0, overnight:null,
