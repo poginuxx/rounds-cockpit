@@ -14,6 +14,7 @@ import { deidentify } from './lib/deid.js';
 import { parseUpdate } from './lib/parser.js';
 import { commitPatient, buildDigest, buildTimeline, neuroStatus } from './lib/diff.js';
 import { newPatient, seedPatients, HOSPITALS } from './lib/schema.js';
+import { MUSCLE_GROUPS, REGIONS, SIDES, GRADES, NOT_TESTED, motorDelta, cellKey } from './lib/motor.js';
 
 // ---- where your model API key would come from (kept null = offline parsing) ----
 // To enable the cloud parser, store the key in the encrypted vault and return it
@@ -153,6 +154,7 @@ function sparkline(series) {
 // ============================ Round Card ============================
 function openCard(id) {
   const p = state.byId[id]; if (!p) return; state.currentId = id;
+  motorDraft = null;                    // fresh motor draft per patient
   $('rcName').textContent = p.name;
   $('rcDx').textContent = `${p.dx} · Day ${p.day}${p.detail ? ' · ' + p.detail : ''}`;
   $('rcLoc').textContent = `${p.hospital.toUpperCase()} · RM ${p.room}`;
@@ -253,14 +255,126 @@ function p_score(p, label) {
 }
 
 function renderNeuro(p) {
-  const cells = NEURO_METRICS.map((m) => {
+  const ribbons = NEURO_METRICS.map((m) => {
     const series = (p.snapshots || []).map((s) => s[m.key]).filter((v) => v != null);
     return series.length >= 2 ? neuroRibbonCell(m, series) : '';
   }).filter(Boolean).join('');
-  // Render the Neuro section only when at least one ribbon has data.
-  $('rcNeuro').innerHTML = cells
-    ? expandable('Neuro', 'GCS / NIHSS trend ribbons', `<div class="labgrid">${cells}</div>`)
-    : '';
+  // The Neuro section is a stack of collapsible blocks (each its own .nblock).
+  const blocks = [];
+  if (ribbons) blocks.push(expandable('Neuro', 'GCS / NIHSS trend ribbons', `<div class="labgrid">${ribbons}</div>`));
+  blocks.push(motorBlock(p));            // motor grid is always available (record a new exam)
+  $('rcNeuro').innerHTML = blocks.join('');
+}
+
+// ---------------------------- motor power grid ----------------------------
+// MRC grid (neuro module #2), inside its own collapsible block. Trend colour and
+// ordering are pure (lib/motor.js); this only renders and wires the picker.
+//
+// motorDraft is the exam currently being composed at the bedside: a working copy
+// of the latest RECORDED exam. Edits live here until "Record exam" persists them.
+// It is never written to the vault until the user records (invariant #4 spirit).
+let motorDraft = null;          // { id, cells } | null
+let mpickKey = null;            // cell key the picker is editing
+
+const latestExam = (p) => (p.motorExams || [])[(p.motorExams || []).length - 1] || null;
+const prevExam   = (p) => (p.motorExams || [])[(p.motorExams || []).length - 2] || null;
+
+function ensureDraft(p) {
+  if (!motorDraft || motorDraft.id !== p.id) {
+    const cur = latestExam(p);
+    motorDraft = { id: p.id, cells: { ...(cur ? cur.cells : {}) } };
+  }
+  return motorDraft;
+}
+
+function motorBlock(p) {
+  ensureDraft(p);
+  return expandable('Motor', 'MRC power grid', `<div id="motorBody">${motorBodyHtml(p)}</div>`);
+}
+
+// The block's inner content. Re-rendered on its own (not the whole section) so an
+// edit keeps the <details> open and the bedside flow uninterrupted.
+function motorBodyHtml(p) {
+  const d = ensureDraft(p);
+  const cur = latestExam(p), prev = prevExam(p);
+  const delta = motorDelta(prev, cur);                 // trend from RECORDED exams only
+  const dates = cur ? (prev ? `${prev.date} → ${cur.date}` : cur.date) : 'no exam recorded';
+
+  const rows = REGIONS.map((reg) => {
+    const body = MUSCLE_GROUPS.filter((g) => g.region === reg.id).map((g) => {
+      const cells = SIDES.map((side) => {
+        const key = cellKey(g, side);
+        return motorCellHtml(key, d.cells[key], delta[key], cur ? cur.cells[key] : undefined);
+      }).join('');
+      return `<div class="mrow"><span class="mglabel">${esc(g.label)}</span>${cells}</div>`;
+    }).join('');
+    return `<div class="mregion">${esc(reg.label)}</div>${body}`;
+  }).join('');
+
+  return `
+    <div class="mtools">
+      <button class="mtool" onclick="motorSetAll5()">Set all 5/5</button>
+      <button class="mtool primary" onclick="motorRecord()">Record exam</button>
+      <span class="mdates">${esc(dates)}</span>
+    </div>
+    <div class="mhead"><span></span><span>Left</span><span>Right</span></div>
+    ${rows}
+    <div class="mlegend"><span class="mk worse">▼ weaker</span><span class="mk better">▲ stronger</span><span class="mk same">– same</span><span class="mk">— not tested</span></div>`;
+}
+
+// One cell: shows the DRAFT grade (or — for not tested), coloured by its trend
+// vs the last recorded exam. An edited-but-unsaved cell is flagged 'pending'.
+function motorCellHtml(key, draftVal, dl, recordedVal) {
+  const val = draftVal == null ? '—' : draftVal;
+  const dirCls = dl ? dl.direction : '';
+  const arrow = dl && dl.direction === 'worse' ? '▼' : dl && dl.direction === 'better' ? '▲' : '';
+  const pending = (draftVal == null ? null : draftVal) !== (recordedVal == null ? null : recordedVal);
+  return `<button class="mcell ${dirCls} ${val === '—' ? 'nt' : ''} ${pending ? 'pending' : ''}" onclick="motorPick('${key}')">
+    <span class="mv">${esc(val)}</span>${arrow ? `<span class="md">${arrow}</span>` : ''}</button>`;
+}
+
+function refreshMotor() {
+  const p = state.byId[state.currentId];
+  if (p && $('motorBody')) $('motorBody').innerHTML = motorBodyHtml(p);
+}
+
+function motorPick(key) {
+  mpickKey = key;
+  const opts = [...GRADES, NOT_TESTED];
+  $('mpick').innerHTML = `<div class="mpick-h">MRC grade</div>
+    <div class="mpick-grid">${opts.map((g) =>
+      `<button onclick="motorSet('${g === NOT_TESTED ? 'NT' : g}')">${g === NOT_TESTED ? 'not<br>tested' : g}</button>`).join('')}</div>`;
+  $('mpick').classList.add('show'); $('mpickScrim').classList.add('show');
+}
+
+function closeMpick() { $('mpick').classList.remove('show'); $('mpickScrim').classList.remove('show'); mpickKey = null; }
+
+function motorSet(g) {
+  const p = state.byId[state.currentId]; if (!p || !mpickKey) return;
+  const d = ensureDraft(p);
+  if (g === 'NT') delete d.cells[mpickKey];   // not tested = ABSENT key, never a value
+  else d.cells[mpickKey] = g;
+  closeMpick();
+  refreshMotor();                              // draft only — not persisted until Record
+}
+
+function motorSetAll5() {
+  const p = state.byId[state.currentId]; if (!p) return;
+  const d = ensureDraft(p);
+  for (const g of MUSCLE_GROUPS) for (const s of SIDES) d.cells[cellKey(g, s)] = '5';
+  refreshMotor();
+}
+
+async function motorRecord() {
+  const p = state.byId[state.currentId]; if (!p) return;
+  const d = ensureDraft(p);
+  const cells = { ...d.cells };
+  if (!Object.keys(cells).length) { toast('Grade at least one muscle first'); return; }
+  p.motorExams = [...(p.motorExams || []), { date: 'today', cells }];
+  await store.savePatient(p);                  // encrypted vault — invariant #2
+  motorDraft = null;                           // rebuild draft from the new latest exam
+  refreshMotor();
+  toast('Motor exam recorded', '✓');
 }
 
 async function neuroStep(label, d) {
@@ -454,7 +568,7 @@ let tt;
 function toast(m, ok) { const t = $('toast'); t.innerHTML = (ok ? `<span class="ok">${ok}</span>` : '') + m; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 1800); }
 
 // ---- expose handlers for inline onclick in index.html ----
-Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, closeTimeline, pick, neuroStep, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, resetDemo, toast });
+Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, closeTimeline, pick, neuroStep, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, resetDemo, toast, motorPick, motorSet, motorSetAll5, motorRecord, closeMpick });
 
 // ---- register the PWA service worker (added by vite-plugin-pwa on build) ----
 if ('serviceWorker' in navigator) {

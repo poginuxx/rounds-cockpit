@@ -42,3 +42,37 @@ describe('seedPatients snapshot backfill', () => {
     expect(efren.snapshots[0].rr).toBeUndefined(); // history has no fabricated vitals
   });
 });
+
+describe('newPatient motorExams', () => {
+  it('starts with an empty motorExams array', () => {
+    expect(newPatient().motorExams).toEqual([]);
+  });
+});
+
+describe('seeded motor exams (MCA infarct → contralateral weakness)', () => {
+  const aurora = seedPatients().find((p) => p.id === 'p_aurora'); // L MCA infarct
+
+  it('carries two dated exams, oldest first', () => {
+    expect(aurora.motorExams).toHaveLength(2);
+    expect(aurora.motorExams.map((e) => e.date)).toEqual(['06/15', '06/16']);
+  });
+
+  it('stores grades as strings so 4-/4/4+ are representable', () => {
+    for (const exam of aurora.motorExams) {
+      for (const v of Object.values(exam.cells)) expect(typeof v).toBe('string');
+    }
+    expect(aurora.motorExams[0].cells['LL.kneeExt.R']).toBe('4-');
+  });
+
+  it('keeps the left side normal and the right side weak (real laterality)', () => {
+    const cur = aurora.motorExams[1].cells;
+    expect(cur['UL.shoulderAbd.L']).toBe('5');     // unaffected side
+    expect(cur['UL.shoulderAbd.R']).toBe('4-');    // contralateral weakness
+  });
+
+  it('leaves a genuinely untested cell ABSENT — never auto-filled to 5/5', () => {
+    for (const exam of aurora.motorExams) {
+      expect(exam.cells['LL.ankleDorsi.R']).toBeUndefined();
+    }
+  });
+});

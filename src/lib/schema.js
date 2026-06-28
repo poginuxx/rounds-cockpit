@@ -26,6 +26,9 @@ export function newPatient(fields = {}) {
     meds: [],              // [{ n, d, day, w }]
     doMain: { t: 'Set plan', s: 'new admission' },
     snapshots: [],         // [{ date, na, rr, spo2, temp }] — drives diff.js
+    motorExams: [],        // [{ date, cells:{ 'UL.shoulderAbd.R':'4', ... } }] — MRC grid.
+                           //   cell values are strings ('0'..'5','4-','4+'); an ABSENT
+                           //   key means NOT TESTED (never auto-filled to a normal score).
     ...fields,
   };
 }
@@ -118,7 +121,22 @@ export function seedPatients() {
       vitals:[['BP','156/90'],['HR','72'],['RR','16'],['TEMP','36.8'],['SPO₂','99%']],
       meds:[{n:'Aspirin',d:'80mg OD',day:'D3',w:false},{n:'Atorvastatin',d:'40mg HS',day:'D3',w:false},{n:'Citicoline',d:'1g BID',day:'D3',w:false}],
       doMain:{t:'Order lactulose + senna',s:'no BM ×2 days · constipation'},
-      snapshots:[{date:'06/16',na:131}] },
+      snapshots:[{date:'06/16',na:131}],
+      // L MCA infarct → contralateral RIGHT-sided weakness; left limbs normal.
+      // Two dated exams with a small right-arm recovery so the trend is visible.
+      // R ankle dorsiflexion is genuinely not tested (absent key) — renders '—'.
+      motorExams:[
+        { date:'06/15', cells:{
+          'UL.shoulderAbd.L':'5','UL.elbowFlex.L':'5','UL.elbowExt.L':'5','UL.wristExt.L':'5','UL.fingerAbd.L':'5',
+          'LL.hipFlex.L':'5','LL.kneeExt.L':'5','LL.kneeFlex.L':'5','LL.ankleDorsi.L':'5','LL.anklePlantar.L':'5',
+          'UL.shoulderAbd.R':'3','UL.elbowFlex.R':'3','UL.elbowExt.R':'3','UL.wristExt.R':'2','UL.fingerAbd.R':'2',
+          'LL.hipFlex.R':'3','LL.kneeExt.R':'4-','LL.kneeFlex.R':'4-','LL.anklePlantar.R':'4' } },
+        { date:'06/16', cells:{
+          'UL.shoulderAbd.L':'5','UL.elbowFlex.L':'5','UL.elbowExt.L':'5','UL.wristExt.L':'5','UL.fingerAbd.L':'5',
+          'LL.hipFlex.L':'5','LL.kneeExt.L':'5','LL.kneeFlex.L':'5','LL.ankleDorsi.L':'5','LL.anklePlantar.L':'5',
+          'UL.shoulderAbd.R':'4-','UL.elbowFlex.R':'4-','UL.elbowExt.R':'3','UL.wristExt.R':'3','UL.fingerAbd.R':'2',
+          'LL.hipFlex.R':'3','LL.kneeExt.R':'4-','LL.kneeFlex.R':'4-','LL.anklePlantar.R':'4' } },
+      ] },
 
     { id:'p_lourdes', name:'Lourdes Bautista', age:'72', sex:'F', dx:'Epilepsy, breakthrough GTC', day:'2', detail:'',
       hospital:'Gov. T. Sison Memorial', room:'215', triage:'g', newCount:0, overnight:null, ready:true,

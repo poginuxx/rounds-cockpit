@@ -80,7 +80,17 @@ npm run build    # -> dist/
     (persisted, encrypted); the new value becomes a ribbon point at the next intake
     commit (`snapshotOf` captures gcs/nihss). Seed `gcs[]`/`nihss[]` history is
     backfilled in `schema.js`. Ribbons render only for metrics that have data.
-  - motor grid, seizure log, stroke clock — still to build, inside the same section.
+  - **Motor power grid** — ✅ DONE. MRC grid (rows = muscle groups, columns =
+    Left/Right) in its own collapsible block, default collapsed. The muscle-group
+    set + grade list + ordering rule are data in `lib/motor.js`; `motorDelta` gives
+    per-cell trend where a DROP in power = 'worse' (red), a rise = 'better' (teal),
+    unchanged = neutral — pure & tested. Grades are strings ('0'..'5','4-','4+') on
+    a dated `motorExams[]` history (own array, NOT in `snapshots[]`); an ABSENT key
+    means NOT TESTED — renders '—', excluded from trend, never auto-filled to 5/5.
+    "Set all 5/5" + a fast cell picker compose a draft; "Record exam" persists it
+    encrypted and the prior exam becomes the trend baseline. Seed: the MCA-infarct
+    patient (Aurora) carries two dated exams with contralateral right-sided weakness.
+  - seizure log, stroke clock — still to build, inside the same section.
 - **Commute / prep mode** — calm read-only overnight diff.
 - **Settings** — store the model API key in the encrypted vault and wire `getApiKey` in
   `main.js` to it (currently returns null → offline parser). See README "Cloud parsing".
