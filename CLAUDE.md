@@ -65,7 +65,33 @@ npm run build    # -> dist/
 ```
 
 ## Roadmap (not yet built)
-- **Capture / OCR** screen (paper lab slips) feeding the same intake confirm flow.
+- **Capture / OCR** — ✅ DONE. The Intake "Snap" source reads a paper lab slip with
+  ON-DEVICE OCR (Tesseract.js) and drops the recognized TEXT into the SAME `#rawText`
+  textarea the typed flow uses, then switches the source back to text — so the
+  existing de-identify → parse → review tray → commit path runs unchanged (zero new
+  downstream code; OCR is an input adapter, not a parallel pipeline). `src/lib/ocr.js`
+  is the thin seam: `recognize(blob,{onProgress})`, lazy `import('tesseract.js')` (its
+  own Vite chunk — main bundle isn't bloated for non-Snap users), terminates the
+  worker each call. `main.js` owns the file input, thumbnail, progress UI, and handoff.
+  INVARIANT — a lab-slip image is the most identifying artifact in the app (printed
+  name + ID) and is TRANSIENT + ON-DEVICE ONLY; a future change must NOT erode this:
+    * The image bytes NEVER leave the device and are NEVER persisted — held in memory
+      only (a File + one objectURL), OCR'd, then dropped (URL revoked). It is never
+      written to the store/IndexedDB and never sent to any network call. Only the
+      EXTRACTED TEXT continues.
+    * OCR runs with NO CDN: Tesseract is forced to LOCAL assets under
+      `public/tesseract/` (`worker.min.js`, the self-contained `tesseract-core-simd-
+      lstm.wasm.js`, and `lang/eng.traineddata.gz` = gzipped tessdata_fast `eng`).
+      They are same-origin → the existing cache-first service worker caches them →
+      recognition works offline after first load. Re-vendor with `npm run vendor:ocr`
+      (copies worker+core from node_modules; see `scripts/vendor-tesseract.mjs` header
+      for the traineddata download). The default CDN fetch the SW can't cache would
+      break offline — do not revert to it.
+    * OCR text is UNVERIFIED input: it enters at the textarea UPSTREAM of de-identify,
+      is editable, and gets no shortcut to commit. De-identification is never bypassed;
+      only de-identified TEXT reaches the cloud parser (invariant #1 intact). The
+      parser's "under-report, never fabricate" property still governs commits.
+  No schema change (OCR only produces text for the existing pipeline).
 - **Billing / PhilHealth** (CF1/CF2/CF4/CSF assembly) — `doMain.bill` already flags it.
 - **Patient timeline** — ✅ DONE. Read-only admission history reached from the Round
   Card header ("History"). Renders the sodium trajectory + captured vitals per day,

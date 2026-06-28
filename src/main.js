@@ -22,6 +22,7 @@ import {
 import {
   defaultWindows, elapsedMs, windowStatus, anyWindowOpen, formatHMS,
 } from './lib/strokeclock.js';
+import { recognize } from './lib/ocr.js';
 
 // ---- where your model API key would come from (kept null = offline parsing) ----
 // To enable the cloud parser, store the key in the encrypted vault and return it
@@ -857,7 +858,83 @@ async function pick(ai, oi) {
 // ============================ Intake ============================
 function setSrc(s) {
   ['text', 'voice', 'photo'].forEach((x) => $('src_' + x).classList.toggle('on', x === s));
-  if (s !== 'text') toast(s === 'voice' ? 'Dictation capture wires in a later step' : 'Photo OCR wires in a later step');
+  if (s === 'voice') { toast('Dictation capture wires in a later step'); return; }
+  // Snap: open the on-device camera/photo picker. Recognized TEXT (never the image)
+  // is dropped into the same intake textarea the typed flow uses (see handleOcrFile).
+  if (s === 'photo') $('ocrFile').click();
+}
+
+// ---------------------------- OCR capture (input adapter) ----------------------------
+// Reads a lab-slip photo entirely ON-DEVICE and hands the recognized TEXT to the
+// EXISTING intake pipeline. The image is transient: held in memory only, OCR'd,
+// then dropped. It is NEVER persisted (no store write) and NEVER sent anywhere —
+// only the text continues, through the unchanged de-identify → parse → commit path.
+let ocrUrl = null;           // objectURL for the thumbnail preview — revoked after use
+
+function ocrCleanup() {       // drop the image from memory (transient by design)
+  if (ocrUrl) { URL.revokeObjectURL(ocrUrl); ocrUrl = null; }
+}
+
+async function handleOcrFile(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = '';                       // allow re-picking the same file later
+  if (!file) return;                          // user cancelled — nothing held
+  ocrCleanup();
+  ocrUrl = URL.createObjectURL(file);         // local preview only; not uploaded
+  renderOcr({ thumb: ocrUrl, progress: 0, stage: 'reading' });
+
+  let text = '';
+  try {
+    text = await recognize(file, { onProgress: (f) => {
+      const bar = $('ocrBar'); if (bar) bar.style.width = Math.round(f * 100) + '%';
+      const pct = $('ocrPct'); if (pct) pct.textContent = Math.round(f * 100) + '%';
+    } });
+  } catch (e) {
+    ocrCleanup();
+    renderOcr({ error: true });
+    return;
+  }
+
+  // Hand the TEXT off to the existing textarea, then drop the image. Switching the
+  // source back to text makes the existing "De-identify & preview" button the next
+  // step — no new downstream code. The text is editable (OCR is imperfect by nature).
+  $('rawText').value = text;
+  ocrCleanup();
+  setSrc('text');
+  renderOcr({ done: true, empty: !text });
+  $('rawText').focus();
+}
+
+function renderOcr(st) {
+  const wrap = $('ocrWrap');
+  if (!wrap) return;
+  if (st.error) {
+    wrap.innerHTML = `<div class="ocr"><div class="ocr-note bad">Couldn't read that image on-device. Try a clearer, well-lit photo.</div>
+      <div class="ocr-tools"><button class="mtool" onclick="retakeOcr()">Try another photo</button></div></div>`;
+    return;
+  }
+  if (st.done) {
+    wrap.innerHTML = `<div class="ocr">
+      <div class="ocr-note">📄 Text was read <b>on this device</b> from the image — the photo was not uploaded or saved, and has been discarded. ${st.empty ? 'No text was found — type the update or try another photo.' : 'Review and edit it below before continuing; it is not verified.'}</div>
+      <div class="ocr-tools"><button class="mtool" onclick="retakeOcr()">Retake / new photo</button></div></div>`;
+    return;
+  }
+  // in-progress
+  wrap.innerHTML = `<div class="ocr">
+    <div class="ocr-row">
+      <img class="ocr-thumb" src="${st.thumb}" alt="lab slip preview">
+      <div class="ocr-prog">
+        <div class="ocr-stage">Reading on device… <span id="ocrPct">0%</span></div>
+        <div class="ocr-track"><div class="ocr-bar" id="ocrBar" style="width:0%"></div></div>
+        <div class="ocr-hint">The image stays on this phone. Only the text you confirm later leaves it.</div>
+      </div>
+    </div></div>`;
+}
+
+function retakeOcr() {
+  ocrCleanup();
+  $('ocrWrap').innerHTML = '';
+  $('ocrFile').click();
 }
 function runDeid() {
   const text = $('rawText').value.trim();
@@ -970,7 +1047,7 @@ let tt;
 function toast(m, ok) { const t = $('toast'); t.innerHTML = (ok ? `<span class="ok">${ok}</span>` : '') + m; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 1800); }
 
 // ---- expose handlers for inline onclick in index.html ----
-Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, closeTimeline, pick, neuroStep, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, resetDemo, toast, motorPick, motorSet, motorSetAll5, motorRecord, closeMpick, openSeizureForm, closeSeizureForm, saveSeizure, szPickType, szPickTrigger, szToggleFeature, szSetWitnessed, szSetResponded, openStrokeForm, closeStrokeForm, saveStrokeClock, scPickType, deactivateStrokeClock });
+Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, closeTimeline, pick, neuroStep, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, resetDemo, toast, motorPick, motorSet, motorSetAll5, motorRecord, closeMpick, openSeizureForm, closeSeizureForm, saveSeizure, szPickType, szPickTrigger, szToggleFeature, szSetWitnessed, szSetResponded, openStrokeForm, closeStrokeForm, saveStrokeClock, scPickType, deactivateStrokeClock, handleOcrFile, retakeOcr });
 
 // ---- register the PWA service worker (added by vite-plugin-pwa on build) ----
 if ('serviceWorker' in navigator) {

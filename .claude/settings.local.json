@@ -21,7 +21,14 @@
       "Bash(npx vitest *)",
       "Bash(grep -n \"const esc\\\\|function esc\\\\|const \\\\$ \\\\|const \\\\$=\\\\|function \\\\$\\\\|jsq\" src/main.js)",
       "Bash(head -40 src/lib/seizures.test.js && echo \"===CLAUDE roadmap===\" && grep -n \"stroke clock\" ../CLAUDE.md rounds-cockpit/CLAUDE.md 2>/dev/null; grep -rn \"stroke clock\" CLAUDE.md)",
-      "Bash(git check-ignore *)"
+      "Bash(git check-ignore *)",
+      "Bash(node -p \"require\\('./node_modules/tesseract.js/package.json'\\).version\")",
+      "Bash(awk '{print $5, $NF}')",
+      "Bash(awk '{print $5,$NF}')",
+      "Bash(grep -ao \"corePath[^;]\\\\{0,120\\\\}\" node_modules/tesseract.js/dist/worker.min.js)",
+      "Bash(grep -ao \"[a-zA-Z]\\\\{0,30\\\\}\\\\\\(relaxedsimd\\\\|simdSupport\\\\|relaxedSimd\\\\|SIMD\\\\|-lstm\\\\|oem\\\\\\)[a-zA-Z0-9?:.'\\\\\" =-]\\\\{0,60\\\\}\" node_modules/tesseract.js/dist/worker.min.js)",
+      "Bash(node -e ' *)",
+      "Bash(git diff *)"
     ]
   }
 }

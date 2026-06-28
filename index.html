@@ -55,6 +55,11 @@
           <div class="src" id="src_voice" onclick="setSrc('voice')"><div class="si">🎙</div><div class="sl">Dictate</div></div>
           <div class="src" id="src_photo" onclick="setSrc('photo')"><div class="si">📷</div><div class="sl">Snap</div></div>
         </div>
+        <!-- Snap → on-device OCR. The image is transient (memory only): never
+             uploaded, never persisted. Only the recognized TEXT lands in #rawText
+             and flows through the same de-identify → parse → commit pipeline. -->
+        <input type="file" accept="image/*" capture="environment" id="ocrFile" hidden onchange="handleOcrFile(event)">
+        <div id="ocrWrap"></div>
         <div class="intxt">
           <textarea id="rawText" placeholder="e.g. Ramon dela Cruz rm 408 — repeat Na 126, headache still severe…"></textarea>
         </div>
