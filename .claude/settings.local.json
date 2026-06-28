@@ -19,7 +19,8 @@
       "Bash(git restore *)",
       "Bash(git checkout *)",
       "Bash(npx vitest *)",
-      "Bash(grep -n \"const esc\\\\|function esc\\\\|const \\\\$ \\\\|const \\\\$=\\\\|function \\\\$\\\\|jsq\" src/main.js)"
+      "Bash(grep -n \"const esc\\\\|function esc\\\\|const \\\\$ \\\\|const \\\\$=\\\\|function \\\\$\\\\|jsq\" src/main.js)",
+      "Bash(head -40 src/lib/seizures.test.js && echo \"===CLAUDE roadmap===\" && grep -n \"stroke clock\" ../CLAUDE.md rounds-cockpit/CLAUDE.md 2>/dev/null; grep -rn \"stroke clock\" CLAUDE.md)"
     ]
   }
 }
