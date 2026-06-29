@@ -102,18 +102,16 @@ function hoursAgoISO(hours) {
   return new Date(Date.now() - hours * 3600 * 1000).toISOString();
 }
 
-/** Hospitals in physical round order. Editable per user. */
-export const HOSPITALS = [
-  'Region I Medical Center',
-  'Gov. T. Sison Memorial',
-  'Nazareth General Hospital',
-];
+// The hospital list is now USER-MANAGED encrypted data (see lib/hospitals.js +
+// store.js '__hospitals'); the seed names below use real full names from it.
+// SEED_HOSPITALS is re-exported for any caller that still imports from here.
+export { SEED_HOSPITALS } from './hospitals.js';
 
 /** Sample roster used for the demo. Replace via real intake before using clinically. */
 export function seedPatients() {
   return [
     { id:'p_ramon', name:'Ramon dela Cruz', age:'54', sex:'M', dx:'Aneurysmal SAH', day:'5', detail:'Hunt-Hess 3',
-      hospital:'Region I Medical Center', room:'408', triage:'r', newCount:3,
+      hospital:'Region 1 Medical Center', room:'408', triage:'r', newCount:3,
       overnight:{ who:'Ramon dela Cruz', txt:'Na fell to ', k:'128', tail:', vasospasm watch' },
       flags:[{t:'Na 128 ↓',lv:'bad'},{t:'HA severe',lv:'warn'}],
       scores:[{l:'GCS',v:'13',a:'',d:true},{l:'WFNS',v:'3',a:''},{l:'NA',v:'128',a:'dn',d:true}],
@@ -130,7 +128,7 @@ export function seedPatients() {
       snapshots:[{date:'06/16',na:128}] },
 
     { id:'p_aurora', name:'Aurora Mendoza', age:'67', sex:'F', dx:'L MCA infarct', day:'3', detail:'NIHSS 6',
-      hospital:'Region I Medical Center', room:'412', triage:'a', newCount:2,
+      hospital:'Region 1 Medical Center', room:'412', triage:'a', newCount:2,
       overnight:{ who:'Aurora Mendoza', txt:'', k:'no BM ×2 days', tail:'' },
       flags:[{t:'Na 131 ↓',lv:'warn'},{t:'No BM ×2',lv:'bad'}],
       scores:[{l:'NIHSS',v:'6',a:'dn'},{l:'GCS',v:'15',a:''},{l:'NA',v:'131',a:'dn'}],
@@ -168,7 +166,7 @@ export function seedPatients() {
         type:'ischemic', windows:defaultWindows() } },
 
     { id:'p_lourdes', name:'Lourdes Bautista', age:'72', sex:'F', dx:'Epilepsy, breakthrough GTC', day:'2', detail:'',
-      hospital:'Gov. T. Sison Memorial', room:'215', triage:'g', newCount:0, overnight:null, ready:true,
+      hospital:'Medical Centrum Dagupan', room:'215', triage:'g', newCount:0, overnight:null, ready:true,
       flags:[{t:'seizure-free 36h',lv:''}],
       scores:[{l:'GCS',v:'15',a:''},{l:'SZ-FREE',v:'36h',a:'dn'},{l:'NA',v:'140',a:''}],
       gcs:[15,15,15,15,15],

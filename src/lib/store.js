@@ -12,6 +12,10 @@ import { newPatient } from './schema.js';
 const DB_NAME = 'rounds_cockpit';
 const STORE = 'vault';
 const META = '__meta';
+const HOSPITALS = '__hospitals';
+// Reserved keys hold app data (not patient records). allPatients() must skip them
+// so they are never decrypted as patients.
+const RESERVED = new Set([META, HOSPITALS]);
 
 let _key = null; // in-memory derived key; null when locked
 let _db = null;  // cached connection
@@ -98,7 +102,7 @@ export async function deletePatient(id) {
 /** Decrypt and return all patients. */
 export async function allPatients() {
   if (!_key) throw new Error('locked');
-  const keys = (await rawKeys()).filter((k) => k !== META);
+  const keys = (await rawKeys()).filter((k) => !RESERVED.has(k));
   const out = [];
   for (const k of keys) {
     try { out.push(newPatient(await decryptObj(_key, await rawGet(k)))); }
@@ -107,8 +111,27 @@ export async function allPatients() {
   return out;
 }
 
-/** Wipe all patient records (keeps the passcode). For the demo reset. */
+/** Wipe all patient records (keeps the passcode AND the managed hospital list). */
 export async function wipePatients() {
-  const keys = (await rawKeys()).filter((k) => k !== META);
+  const keys = (await rawKeys()).filter((k) => !RESERVED.has(k));
   for (const k of keys) await rawDel(k);
+}
+
+/**
+ * The user-managed hospital list (encrypted like everything else). Returns the
+ * stored array, or null if none has been saved yet (first run → caller seeds).
+ */
+export async function getHospitals() {
+  if (!_key) throw new Error('locked');
+  const blob = await rawGet(HOSPITALS);
+  if (!blob) return null;
+  try { return await decryptObj(_key, blob); }
+  catch { return null; }
+}
+
+/** Persist the hospital list (encrypted). */
+export async function setHospitals(list) {
+  if (!_key) throw new Error('locked');
+  await rawPut(HOSPITALS, await encryptObj(_key, list));
+  return list;
 }

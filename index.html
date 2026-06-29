@@ -34,7 +34,10 @@
         <div class="hero">
           <div class="top">
             <div><h1>Today's rounds</h1><div class="date" id="todayDate">—</div></div>
-            <button class="iconbtn" onclick="lockApp()" title="Lock">⏻</button>
+            <div class="top-ctl">
+              <button class="iconbtn" onclick="openHospitals()" title="Manage hospitals">🏥</button>
+              <button class="iconbtn" onclick="lockApp()" title="Lock">⏻</button>
+            </div>
           </div>
           <div class="digest"><div class="ic">!</div><div class="t" id="digest"></div></div>
           <div class="routebar" id="routebar"></div>
@@ -138,12 +141,15 @@
           <div class="field"><label>Day</label><input id="f_day" inputmode="numeric" placeholder="1"></div>
         </div>
         <div class="field"><label>Diagnosis</label><input id="f_dx" placeholder="Ischemic stroke"></div>
-        <div class="field"><label>Hospital</label><select id="f_hosp">
-          <option>Region I Medical Center</option><option>Gov. T. Sison Memorial</option><option>Nazareth General Hospital</option></select></div>
+        <div class="field"><label>Hospital <a class="field-link" onclick="closeAdd();openHospitals()">Manage</a></label><select id="f_hosp"></select></div>
         <div class="field"><label>Room</label><input id="f_room" placeholder="305"></div>
       </div>
       <div class="formbtns"><button class="btn ghost" onclick="closeAdd()">Cancel</button><button class="btn primary" onclick="savePatient()">Encrypt &amp; save</button></div>
     </div>
+
+    <!-- manage-hospitals sheet: the user-managed hospital list (filled by JS) -->
+    <div class="scrim" id="hospScrim" onclick="closeHospitals()"></div>
+    <div class="addsheet" id="hospsheet"></div>
 
     <!-- motor-grade picker (fast cell editor for the MRC power grid) -->
     <div class="mpick-scrim" id="mpickScrim" onclick="closeMpick()"></div>

@@ -13,7 +13,11 @@ import * as store from './lib/store.js';
 import { deidentify } from './lib/deid.js';
 import { parseUpdate } from './lib/parser.js';
 import { commitPatient, buildDigest, buildTimeline, neuroStatus } from './lib/diff.js';
-import { newPatient, seedPatients, HOSPITALS } from './lib/schema.js';
+import { newPatient, seedPatients } from './lib/schema.js';
+import {
+  SEED_HOSPITALS, addHospital, removeHospital, moveHospital, abbrFor,
+  groupPatientsByHospital,
+} from './lib/hospitals.js';
 import { MUSCLE_GROUPS, REGIONS, SIDES, GRADES, NOT_TESTED, motorDelta, cellKey } from './lib/motor.js';
 import {
   SEIZURE_TYPES, FEATURES, TRIGGERS, summary as seizureSummary,
@@ -32,7 +36,7 @@ const getApiKey = async () => API_KEY;
 window.setApiKey = (k) => { API_KEY = k; }; // for manual testing in the console
 
 // ---- in-memory view state (decrypted records live here while unlocked) ----
-const state = { patients: [], byId: {}, currentId: null, deid: null, review: [] };
+const state = { patients: [], byId: {}, currentId: null, deid: null, review: [], hospitals: [] };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
 // Escape a string for safe interpolation inside a single-quoted inline JS arg
@@ -90,6 +94,12 @@ function lockApp() { clearClockTimer(); store.lock(); entered = ''; $('lockHint'
 async function loadPatients() {
   state.patients = await store.allPatients();
   state.byId = Object.fromEntries(state.patients.map((p) => [p.id, p]));
+  // Seed the managed hospital list on first load only; an existing list is kept.
+  state.hospitals = await store.getHospitals();
+  if (!state.hospitals) {
+    state.hospitals = SEED_HOSPITALS.map((h) => ({ ...h }));
+    await store.setHospitals(state.hospitals);
+  }
 }
 
 // ============================ navigation ============================
@@ -126,13 +136,16 @@ function renderToday() {
      <div class="r"><div class="num">${ambers}</div><div class="lbl">amber</div></div>
      <div class="r"><div class="num">~${Math.round(pts.length * 9.6)}<span style="font-size:12px">m</span></div><div class="lbl">est. round</div></div>`;
 
-  const byH = {}; pts.forEach((p) => { (byH[p.hospital] = byH[p.hospital] || []).push(p); });
   const list = $('list');
   if (!pts.length) { list.innerHTML = `<div class="empty"><div class="big">🗂️</div>No patients. Reset demo to reseed.</div>`; return; }
   let html = '';
-  HOSPITALS.filter((h) => byH[h]).forEach((h, i) => {
-    html += `<div class="group"><div class="group-h"><div class="name"><span class="pin-i">◉</span>${esc(h)}</div><div class="meta">STOP ${i + 1}</div></div>`;
-    byH[h].sort((a, b) => (a.room || '').localeCompare(b.room || '')).forEach((p) => {
+  // Census groups follow the managed hospital list (route order); headers show the
+  // ABBREVIATION (full name when no abbr). Patients on an unlisted hospital are
+  // grouped LAST under their stored name — never hidden.
+  groupPatientsByHospital(state.hospitals, pts).forEach((g, i) => {
+    const meta = g.listed ? `STOP ${i + 1}` : 'unlisted';
+    html += `<div class="group"><div class="group-h"><div class="name"><span class="pin-i">◉</span>${esc(g.abbr)}</div><div class="meta">${esc(meta)}</div></div>`;
+    g.patients.sort((a, b) => (a.room || '').localeCompare(b.room || '')).forEach((p) => {
       const flags = (p.flags || []).map((f) => `<span class="flag ${f.lv}">${esc(f.t)}</span>`).join('');
       const extra = p.ready ? `<span class="chip teal">Ready for discharge</span>` : (p.newCount ? `<span class="newbadge">${p.newCount} NEW</span>` : '');
       html += `<div class="pcard ${p.triage}" onclick="openCard('${p.id}')">
@@ -168,7 +181,7 @@ function openCard(id) {
   motorDraft = null;                    // fresh motor draft per patient
   $('rcName').textContent = p.name;
   $('rcDx').textContent = `${p.dx} · Day ${p.day}${p.detail ? ' · ' + p.detail : ''}`;
-  $('rcLoc').textContent = `${p.hospital.toUpperCase()} · RM ${p.room}`;
+  $('rcLoc').textContent = `${abbrFor(state.hospitals, p.hospital).toUpperCase()} · RM ${p.room}`;
   renderScores(p);
   $('rcAsk').innerHTML = p.ask.map((a, ai) => `
     <div class="askrow"><div class="q">${esc(a.q)}${a.s ? `<small>${esc(a.s)}</small>` : ''}</div>
@@ -802,7 +815,7 @@ function openTimeline() {
   const p = state.byId[state.currentId]; if (!p) return;
   $('tlName').textContent = p.name;
   $('tlDx').textContent = `${p.dx} · Day ${p.day}${p.detail ? ' · ' + p.detail : ''}`;
-  $('tlLoc').textContent = `${p.hospital.toUpperCase()} · RM ${p.room}`;
+  $('tlLoc').textContent = `${abbrFor(state.hospitals, p.hospital).toUpperCase()} · RM ${p.room}`;
 
   const rows = buildTimeline(p);                       // newest-first
   const naSeries = (p.snapshots || []).map((s) => s.na).filter((v) => v != null);
@@ -1017,8 +1030,17 @@ async function commitReview() {
 }
 
 // ============================ Add / reset ============================
-function openAdd() { $('scrim2').classList.add('show'); $('addsheet').classList.add('show'); }
+function openAdd() { fillHospitalSelect(); $('scrim2').classList.add('show'); $('addsheet').classList.add('show'); }
 function closeAdd() { $('scrim2').classList.remove('show'); $('addsheet').classList.remove('show'); }
+
+// The Add-Patient dropdown lists hospitals by FULL NAME (where a wrong choice has
+// consequences), in route order, from the managed list.
+function fillHospitalSelect() {
+  const sel = $('f_hosp'); if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = state.hospitals.map((h) => `<option>${esc(h.name)}</option>`).join('');
+  if (state.hospitals.some((h) => h.name === prev)) sel.value = prev;
+}
 async function savePatient() {
   const g = (id) => $(id).value.trim();
   const name = g('f_name'); if (!name) { toast('Name is required'); return; }
@@ -1038,16 +1060,69 @@ async function savePatient() {
 }
 async function resetDemo() {
   await store.wipePatients();
+  // Reset the hospital list to the real seed too, so the reseeded demo patients
+  // (which use real full names) group correctly under the listed hospitals.
+  state.hospitals = SEED_HOSPITALS.map((h) => ({ ...h }));
+  await store.setHospitals(state.hospitals);
   for (const p of seedPatients()) await store.savePatient(p);
   await loadPatients(); renderToday(); toast('Demo data reseeded', '✓');
 }
+
+// ============================ Manage hospitals ============================
+// A focused sheet (NOT a full Settings screen) to add / remove / reorder the
+// hospital list. Full name is the source of truth; here we show full name WITH
+// its abbreviation. Reordering uses move-up / move-down (no drag-and-drop).
+function openHospitals() { renderHospitals(); $('hospScrim').classList.add('show'); $('hospsheet').classList.add('show'); }
+function closeHospitals() { $('hospScrim').classList.remove('show'); $('hospsheet').classList.remove('show'); }
+
+function renderHospitals() {
+  const rows = state.hospitals.map((h, i) => `
+    <div class="hosp-row">
+      <div class="hosp-id"><div class="hosp-nm">${esc(h.name)}</div><div class="hosp-ab">${esc(h.abbr || '— no abbreviation')}</div></div>
+      <div class="hosp-ctl">
+        <button class="iconbtn" title="Move up" ${i === 0 ? 'disabled' : ''} onclick="hospMove(${i},-1)">↑</button>
+        <button class="iconbtn" title="Move down" ${i === state.hospitals.length - 1 ? 'disabled' : ''} onclick="hospMove(${i},1)">↓</button>
+        <button class="iconbtn danger" title="Remove" onclick="hospRemove(${i})">✕</button>
+      </div>
+    </div>`).join('');
+  $('hospsheet').innerHTML = `
+    <div class="grab"></div>
+    <h2>Manage hospitals</h2>
+    <div class="lead">Route order, top to bottom. The full name is stored on each patient; the abbreviation is the short label shown on the census and round card.</div>
+    <div class="form">
+      <div class="hosp-list">${rows || '<div class="lead" style="padding-left:0">No hospitals yet — add one below.</div>'}</div>
+      <div class="hosp-add">
+        <div class="frow">
+          <div class="field" style="flex:2"><label>Full name</label><input id="h_name" placeholder="The Medical City Pangasinan"></div>
+          <div class="field"><label>Abbreviation</label><input id="h_abbr" placeholder="TMCP"></div>
+        </div>
+        <button class="btn primary" onclick="hospAdd()">Add hospital</button>
+      </div>
+    </div>
+    <div class="formbtns"><button class="btn ghost" onclick="closeHospitals()">Done</button></div>`;
+}
+
+async function persistHospitals() {
+  await store.setHospitals(state.hospitals);
+  renderHospitals();
+  renderToday();
+}
+async function hospAdd() {
+  const name = $('h_name').value.trim();
+  if (!name) { toast('Hospital name is required'); return; }
+  state.hospitals = addHospital(state.hospitals, name, $('h_abbr').value);
+  await persistHospitals();
+  toast('Hospital added', '✓');
+}
+async function hospRemove(i) { state.hospitals = removeHospital(state.hospitals, i); await persistHospitals(); }
+async function hospMove(i, dir) { state.hospitals = moveHospital(state.hospitals, i, dir); await persistHospitals(); }
 
 // ============================ toast ============================
 let tt;
 function toast(m, ok) { const t = $('toast'); t.innerHTML = (ok ? `<span class="ok">${ok}</span>` : '') + m; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 1800); }
 
 // ---- expose handlers for inline onclick in index.html ----
-Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, closeTimeline, pick, neuroStep, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, resetDemo, toast, motorPick, motorSet, motorSetAll5, motorRecord, closeMpick, openSeizureForm, closeSeizureForm, saveSeizure, szPickType, szPickTrigger, szToggleFeature, szSetWitnessed, szSetResponded, openStrokeForm, closeStrokeForm, saveStrokeClock, scPickType, deactivateStrokeClock, handleOcrFile, retakeOcr });
+Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, closeTimeline, pick, neuroStep, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, resetDemo, toast, motorPick, motorSet, motorSetAll5, motorRecord, closeMpick, openSeizureForm, closeSeizureForm, saveSeizure, szPickType, szPickTrigger, szToggleFeature, szSetWitnessed, szSetResponded, openStrokeForm, closeStrokeForm, saveStrokeClock, scPickType, deactivateStrokeClock, handleOcrFile, retakeOcr, openHospitals, closeHospitals, hospAdd, hospRemove, hospMove });
 
 // ---- register the PWA service worker (added by vite-plugin-pwa on build) ----
 if ('serviceWorker' in navigator) {

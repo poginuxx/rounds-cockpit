@@ -172,6 +172,37 @@ npm run build    # -> dist/
         activation form (physician-set).
     With this, all four neuro modules (ribbons, motor grid, seizure log, stroke
     clock) are complete.
+- **Hospital list** — ✅ DONE. The hospital list is now USER-MANAGED data, not a
+  hardcoded array. It lives in the encrypted vault under the reserved key
+  `__hospitals` (encrypted like everything else; `store.js` skips reserved keys in
+  `allPatients`). Seeded with the 10 real hospitals on first load ONLY — an
+  existing list is never overwritten. A focused "Manage hospitals" sheet (reached
+  from the Today header 🏥 button and a "Manage" link beside the Add-Patient
+  hospital field — NOT a full Settings screen) adds / removes / reorders entries;
+  reorder is move-up / move-down, not drag-and-drop. All list logic is pure &
+  tested in `lib/hospitals.js` (`SEED_HOSPITALS`, add/remove/move, `abbrFor`,
+  `groupPatientsByHospital`); `main.js` only renders the manager, the dropdown, and
+  the display labels.
+  NAME vs ABBREVIATION — a hospital is `{ name, abbr }`. The FULL NAME is the
+  stored source of truth: `patient.hospital` is the full-name STRING (NO patient
+  schema change, no id, no migration). The abbreviation is a DISPLAY label only,
+  looked up by matching the patient's stored name. Show the ABBREVIATION where the
+  user scans their own patients and space is tight (Today census group headers,
+  Round Card + timeline location); show the FULL NAME where a wrong choice has
+  consequences (Add-Patient dropdown, the Manage sheet — full name WITH abbr — and
+  any future printed/official output). If a hospital has no abbr, fall back to the
+  full name everywhere (`abbrFor` never returns blank for a non-blank name).
+  SAFETY — no existing patient may lose its hospital:
+    * A patient whose stored hospital is NOT in the current list is NEVER hidden or
+      dropped: `groupPatientsByHospital` sorts such patients LAST under an
+      "Other / unlisted" group, shown with their stored name as-is. Pinned by test.
+    * RENAME LIMITATION: matching is by exact full-name string. Renaming a hospital
+      in the manager does NOT rewrite the string on existing patients — they fall to
+      the unlisted group until re-pointed. (This is why the old placeholder seed
+      "Region I Medical Center" / "Gov. T. Sison Memorial" patients show as unlisted
+      after upgrade — they are not lost.) Seed roster now uses real canonical full
+      names (the Roman-`I` → numeral-`1` gotcha is fixed). "reset demo data" reseeds
+      patients with real names AND resets the hospital list to the seed.
 - **Commute / prep mode** — calm read-only overnight diff.
 - **Settings** — store the model API key in the encrypted vault and wire `getApiKey` in
   `main.js` to it (currently returns null → offline parser). See README "Cloud parsing".
