@@ -13,9 +13,11 @@ const DB_NAME = 'rounds_cockpit';
 const STORE = 'vault';
 const META = '__meta';
 const HOSPITALS = '__hospitals';
+const PRERESTORE = '__prerestore'; // snapshot of the vault taken just before a restore
+const LASTBACKUP = '__lastbackup'; // non-secret timestamp of the last successful export
 // Reserved keys hold app data (not patient records). allPatients() must skip them
 // so they are never decrypted as patients.
-const RESERVED = new Set([META, HOSPITALS]);
+const RESERVED = new Set([META, HOSPITALS, PRERESTORE, LASTBACKUP]);
 
 let _key = null; // in-memory derived key; null when locked
 let _db = null;  // cached connection
@@ -134,4 +136,73 @@ export async function setHospitals(list) {
   if (!_key) throw new Error('locked');
   await rawPut(HOSPITALS, await encryptObj(_key, list));
   return list;
+}
+
+// ============================ backup / restore ============================
+// These support the encrypted backup feature. The envelope crypto lives in
+// backup.js (pure); here we only read the live vault and atomically replace it,
+// always snapshotting the current data first so a restore is undoable.
+
+const patientKeys = async () => (await rawKeys()).filter((k) => !RESERVED.has(k));
+
+/** Snapshot of the CURRENT vault as raw (already-encrypted) blobs — no decryption,
+ *  so the ciphertext is preserved exactly. Used as the pre-restore safety net. */
+async function rawSnapshot() {
+  const records = {};
+  for (const k of await patientKeys()) records[k] = await rawGet(k);
+  return { records, hospitals: (await rawGet(HOSPITALS)) || null, savedAt: Date.now() };
+}
+
+/** Wipe every non-reserved (patient) key, then restore a set of raw blobs. */
+async function restoreRaw(snapshot) {
+  for (const k of await patientKeys()) await rawDel(k);
+  for (const [k, blob] of Object.entries(snapshot.records)) await rawPut(k, blob);
+  if (snapshot.hospitals) await rawPut(HOSPITALS, snapshot.hospitals);
+  else await rawDel(HOSPITALS);
+}
+
+/**
+ * Replace the live vault with restored data. Order matters for safety:
+ *  1. snapshot the current vault (raw ciphertext) into __prerestore — undo target;
+ *  2. wipe the current patient records;
+ *  3. write the restored patients + hospital list, re-encrypted under the CURRENT
+ *     on-device key (so this also works right after a fresh-device passcode setup).
+ * The on-device passcode/key is never touched. Returns the restored patient count.
+ */
+export async function replaceVault(patients, hospitals) {
+  if (!_key) throw new Error('locked');
+  await rawPut(PRERESTORE, await rawSnapshot());
+  for (const k of await patientKeys()) await rawDel(k);
+  for (const p of patients) await rawPut(p.id, await encryptObj(_key, p));
+  await rawPut(HOSPITALS, await encryptObj(_key, hospitals || []));
+  return patients.length;
+}
+
+/** Is there a pre-restore snapshot to undo back to? */
+export async function hasPrerestore() {
+  return !!(await rawGet(PRERESTORE));
+}
+
+/** Undo the most recent restore: put the snapshotted vault back, drop the snapshot.
+ *  Returns true if a snapshot existed and was restored. */
+export async function undoRestore() {
+  const snap = await rawGet(PRERESTORE);
+  if (!snap) return false;
+  await restoreRaw(snap);
+  await rawDel(PRERESTORE);
+  return true;
+}
+
+/** Drop the pre-restore snapshot once the user is satisfied (no longer undoable). */
+export async function clearPrerestore() {
+  await rawDel(PRERESTORE);
+}
+
+/** Non-secret timestamp (ms) of the last successful export, or null. Stored in
+ *  the clear deliberately — it carries no patient data. */
+export async function getLastBackupAt() {
+  return (await rawGet(LASTBACKUP)) ?? null;
+}
+export async function setLastBackupAt(ts) {
+  await rawPut(LASTBACKUP, ts);
 }

@@ -27,6 +27,7 @@ import {
   defaultWindows, elapsedMs, windowStatus, anyWindowOpen, formatHMS,
 } from './lib/strokeclock.js';
 import { recognize } from './lib/ocr.js';
+import { createBackup, readBackup, passphraseStrength, BackupError } from './lib/backup.js';
 
 // ---- where your model API key would come from (kept null = offline parsing) ----
 // To enable the cloud parser, store the key in the encrypted vault and return it
@@ -36,7 +37,7 @@ const getApiKey = async () => API_KEY;
 window.setApiKey = (k) => { API_KEY = k; }; // for manual testing in the console
 
 // ---- in-memory view state (decrypted records live here while unlocked) ----
-const state = { patients: [], byId: {}, currentId: null, deid: null, review: [], hospitals: [] };
+const state = { patients: [], byId: {}, currentId: null, deid: null, review: [], hospitals: [], lastBackupAt: null };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
 // Escape a string for safe interpolation inside a single-quoted inline JS arg
@@ -100,6 +101,7 @@ async function loadPatients() {
     state.hospitals = SEED_HOSPITALS.map((h) => ({ ...h }));
     await store.setHospitals(state.hospitals);
   }
+  state.lastBackupAt = await store.getLastBackupAt();
 }
 
 // ============================ navigation ============================
@@ -135,6 +137,8 @@ function renderToday() {
      <div class="r"><div class="num">${reds}</div><div class="lbl">red</div></div>
      <div class="r"><div class="num">${ambers}</div><div class="lbl">amber</div></div>
      <div class="r"><div class="num">~${Math.round(pts.length * 9.6)}<span style="font-size:12px">m</span></div><div class="lbl">est. round</div></div>`;
+
+  renderBackupNudge();
 
   const list = $('list');
   if (!pts.length) { list.innerHTML = `<div class="empty"><div class="big">🗂️</div>No patients. Reset demo to reseed.</div>`; return; }
@@ -1117,12 +1121,207 @@ async function hospAdd() {
 async function hospRemove(i) { state.hospitals = removeHospital(state.hospitals, i); await persistHospitals(); }
 async function hospMove(i, dir) { state.hospitals = moveHospital(state.hospitals, i, dir); await persistHospitals(); }
 
+// ============================ Backup & restore ============================
+// A focused sheet (NOT a full Settings screen) for an ENCRYPTED, portable backup.
+// SAFETY (see CLAUDE.md): the file is always encrypted under a SEPARATE strong
+// recovery passphrase (never the daily PIN, never stored); it is downloaded for
+// the user to keep — never uploaded. Restore snapshots the current vault first
+// and is undoable. This file does file I/O + confirmations only; the envelope
+// crypto is in lib/backup.js and the atomic swap is in lib/store.js.
+
+const freshRestore = () => ({ step: 'idle', fileName: null, fileText: null, env: null, payload: null, pass: null });
+let restore = freshRestore();
+
+function daysAgoLabel(ts) {
+  const ms = Date.now() - ts;
+  const d = Math.floor(ms / 86_400_000);
+  if (d <= 0) return 'today';
+  if (d === 1) return 'yesterday';
+  return `${d} days ago`;
+}
+
+// The gentle Today-screen nudge. Stronger wording the longer it's been (or never).
+function renderBackupNudge() {
+  const el = $('backupNudge');
+  if (!el) return;
+  if (!state.patients.length) { el.style.display = 'none'; return; }
+  const ts = state.lastBackupAt;
+  let cls = 'ok', txt;
+  if (!ts) { cls = 'warn'; txt = 'No backup yet — protect against a lost phone or forgotten passcode.'; }
+  else {
+    const days = Math.floor((Date.now() - ts) / 86_400_000);
+    txt = `Last backup: ${daysAgoLabel(ts)}.`;
+    if (days >= 7) { cls = 'warn'; txt += ' Consider making a fresh one.'; }
+  }
+  el.className = `backup-nudge ${cls}`;
+  el.innerHTML = `<span class="bn-i">💾</span><div>${esc(txt)}</div><span class="bn-go">Backup ›</span>`;
+  el.style.display = 'flex';
+}
+
+function openBackup() { restore = freshRestore(); renderBackup(); $('bkScrim').classList.add('show'); $('bksheet').classList.add('show'); }
+function closeBackup() { $('bkScrim').classList.remove('show'); $('bksheet').classList.remove('show'); }
+function pickBackupFile() { $('bkFile').click(); }
+
+function renderBackup() {
+  const lastTxt = state.lastBackupAt
+    ? `Last backup: <b>${esc(daysAgoLabel(state.lastBackupAt))}</b>.`
+    : 'You have <b>no backup yet</b>.';
+
+  // The restore half changes with the step in the flow.
+  let restoreInner = '';
+  if (restore.step === 'previewed' && restore.payload) {
+    const when = restore.env?.createdAt ? new Date(restore.env.createdAt).toLocaleString() : 'unknown date';
+    restoreInner = `
+      <div class="bk-preview">
+        <div class="bk-pv-h">This backup contains</div>
+        <div class="bk-pv-row"><span>Created</span><b>${esc(when)}</b></div>
+        <div class="bk-pv-row"><span>Patients</span><b>${restore.payload.patients.length}</b></div>
+        <div class="bk-pv-row"><span>Hospitals</span><b>${restore.payload.hospitals.length}</b></div>
+      </div>
+      <div class="bk-warn">Restoring <b>replaces</b> all current patients and your hospital list. Your current data is snapshotted first, so you can undo this immediately after.</div>
+      <div class="frow">
+        <button class="btn ghost" onclick="cancelRestore()">Cancel</button>
+        <button class="btn primary danger" onclick="doRestoreApply()">Replace my data</button>
+      </div>`;
+  } else if (restore.step === 'restored') {
+    restoreInner = `
+      <div class="bk-ok">✓ Restored ${restore.payload ? restore.payload.patients.length : ''} patient(s). Your previous data was saved — undo if this was a mistake.</div>
+      <div class="frow">
+        <button class="btn ghost" onclick="doUndoRestore()">Undo restore</button>
+        <button class="btn primary" onclick="closeBackup()">Done</button>
+      </div>`;
+  } else {
+    const fileLabel = restore.fileName ? `Selected: <b>${esc(restore.fileName)}</b>` : 'No file chosen';
+    restoreInner = `
+      <button class="btn ghost" onclick="pickBackupFile()">Choose backup file…</button>
+      <div class="bk-file">${fileLabel}</div>
+      <div class="field"><label>Recovery passphrase</label>
+        <input id="bk_rpass" type="password" placeholder="the passphrase you set for this backup" autocomplete="off"></div>
+      <button class="btn primary" onclick="doRestorePreview()" ${restore.fileText ? '' : 'disabled'}>Decrypt &amp; preview</button>`;
+  }
+
+  $('bksheet').innerHTML = `
+    <div class="grab"></div>
+    <h2>Backup &amp; restore</h2>
+    <div class="lead">${lastTxt} A backup is a single <b>encrypted</b> file you keep yourself — it is never uploaded anywhere.</div>
+
+    <div class="bk-sect">
+      <div class="bk-sect-h">Create a backup</div>
+      <div class="bk-note">Protect it with a <b>strong recovery passphrase</b> — not your daily 6-digit passcode. The file is portable, so a short PIN could be cracked offline. Use 4+ words or 12+ characters. The passphrase is <b>never stored</b>; if you lose it the backup can't be opened.</div>
+      <div class="field"><label>Recovery passphrase</label>
+        <input id="bk_pass" type="password" placeholder="e.g. four random unrelated words" autocomplete="off"></div>
+      <button class="btn primary" onclick="doBackupExport()">Create encrypted backup</button>
+    </div>
+
+    <div class="bk-sect">
+      <div class="bk-sect-h">Restore from a backup</div>
+      <div class="bk-note">Restore onto this phone or a brand-new install. You'll see what the file contains and confirm before anything changes.</div>
+      ${restoreInner}
+    </div>
+
+    <div class="formbtns"><button class="btn ghost" onclick="closeBackup()">Close</button></div>`;
+}
+
+function downloadText(text, filename) {
+  const blob = new Blob([text], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function doBackupExport() {
+  const pass = $('bk_pass').value;
+  const s = passphraseStrength(pass);
+  if (!s.ok) { toast(s.reason); return; }
+  const payload = { patients: state.patients, hospitals: state.hospitals };
+  let text;
+  try {
+    const env = await createBackup(payload, pass);
+    text = JSON.stringify(env, null, 2);
+    // VERIFY-AFTER-WRITE: decrypt the exact bytes we're about to save, with the
+    // same passphrase, BEFORE claiming success. A backup that can't be read back
+    // is worse than none.
+    const check = await readBackup(text, pass);
+    if (check.patients.length !== payload.patients.length
+        || check.hospitals.length !== payload.hospitals.length) {
+      throw new Error('verification mismatch');
+    }
+  } catch (e) {
+    toast('Backup failed verification — nothing was saved.');
+    return;
+  }
+  downloadText(text, `rounds-backup-${new Date().toISOString().slice(0, 10)}.rcbackup`);
+  const ts = Date.now();
+  await store.setLastBackupAt(ts);
+  state.lastBackupAt = ts;
+  renderBackup(); renderBackupNudge();
+  toast('Encrypted backup verified & saved', '✓');
+}
+
+async function handleBackupFile(ev) {
+  const f = ev.target.files && ev.target.files[0];
+  ev.target.value = ''; // allow re-selecting the same file later
+  if (!f) return;
+  restore = freshRestore();
+  restore.fileName = f.name;
+  try {
+    restore.fileText = await f.text();
+    try { restore.env = JSON.parse(restore.fileText); } catch { restore.env = null; }
+  } catch { toast('Could not read that file.'); return; }
+  renderBackup();
+}
+
+async function doRestorePreview() {
+  if (!restore.fileText) { toast('Choose a backup file first'); return; }
+  const pass = $('bk_rpass').value;
+  if (!pass) { toast('Enter the recovery passphrase'); return; }
+  try {
+    const payload = await readBackup(restore.fileText, pass);
+    restore.payload = payload;
+    restore.pass = pass;
+    restore.step = 'previewed';
+    renderBackup();
+  } catch (e) {
+    // Typed BackupError messages are user-facing; anything else is generic.
+    toast(e instanceof BackupError ? e.message : 'Could not read this backup file.');
+  }
+}
+
+async function doRestoreApply() {
+  if (!restore.payload) return;
+  try {
+    await store.replaceVault(restore.payload.patients, restore.payload.hospitals);
+    await loadPatients();
+    renderToday();
+    restore.step = 'restored';
+    renderBackup();
+  } catch (e) {
+    toast('Restore failed — your data is unchanged.');
+  }
+}
+
+async function doUndoRestore() {
+  const ok = await store.undoRestore();
+  if (!ok) { toast('Nothing to undo'); return; }
+  await loadPatients();
+  renderToday();
+  restore = freshRestore();
+  renderBackup();
+  toast('Restore undone — your previous data is back', '✓');
+}
+
+function cancelRestore() { restore = freshRestore(); renderBackup(); }
+
 // ============================ toast ============================
 let tt;
 function toast(m, ok) { const t = $('toast'); t.innerHTML = (ok ? `<span class="ok">${ok}</span>` : '') + m; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 1800); }
 
 // ---- expose handlers for inline onclick in index.html ----
-Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, closeTimeline, pick, neuroStep, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, resetDemo, toast, motorPick, motorSet, motorSetAll5, motorRecord, closeMpick, openSeizureForm, closeSeizureForm, saveSeizure, szPickType, szPickTrigger, szToggleFeature, szSetWitnessed, szSetResponded, openStrokeForm, closeStrokeForm, saveStrokeClock, scPickType, deactivateStrokeClock, handleOcrFile, retakeOcr, openHospitals, closeHospitals, hospAdd, hospRemove, hospMove });
+Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, closeTimeline, pick, neuroStep, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, resetDemo, toast, motorPick, motorSet, motorSetAll5, motorRecord, closeMpick, openSeizureForm, closeSeizureForm, saveSeizure, szPickType, szPickTrigger, szToggleFeature, szSetWitnessed, szSetResponded, openStrokeForm, closeStrokeForm, saveStrokeClock, scPickType, deactivateStrokeClock, handleOcrFile, retakeOcr, openHospitals, closeHospitals, hospAdd, hospRemove, hospMove,
+  openBackup, closeBackup, pickBackupFile, doBackupExport, handleBackupFile,
+  doRestorePreview, doRestoreApply, doUndoRestore, cancelRestore });
 
 // ---- register the PWA service worker (added by vite-plugin-pwa on build) ----
 if ('serviceWorker' in navigator) {

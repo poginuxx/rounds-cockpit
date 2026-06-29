@@ -35,6 +35,7 @@
           <div class="top">
             <div><h1>Today's rounds</h1><div class="date" id="todayDate">—</div></div>
             <div class="top-ctl">
+              <button class="iconbtn" onclick="openBackup()" title="Backup &amp; restore">💾</button>
               <button class="iconbtn" onclick="openHospitals()" title="Manage hospitals">🏥</button>
               <button class="iconbtn" onclick="lockApp()" title="Lock">⏻</button>
             </div>
@@ -43,6 +44,7 @@
           <div class="routebar" id="routebar"></div>
         </div>
         <div class="demo-banner"><span>⚠</span><div><b>Foundation demo.</b> Seeded sample patients — don't enter real ones until the full app is built.</div></div>
+        <div class="backup-nudge" id="backupNudge" onclick="openBackup()" style="display:none"></div>
         <div id="list"></div>
         <div style="height:20px"></div>
       </section>
@@ -150,6 +152,12 @@
     <!-- manage-hospitals sheet: the user-managed hospital list (filled by JS) -->
     <div class="scrim" id="hospScrim" onclick="closeHospitals()"></div>
     <div class="addsheet" id="hospsheet"></div>
+
+    <!-- backup & restore sheet: encrypted export / restore (filled by JS) -->
+    <!-- The restore file is read in-memory only; it is never uploaded anywhere. -->
+    <input type="file" accept=".rcbackup,.json,application/json" id="bkFile" hidden onchange="handleBackupFile(event)">
+    <div class="scrim" id="bkScrim" onclick="closeBackup()"></div>
+    <div class="addsheet" id="bksheet"></div>
 
     <!-- motor-grade picker (fast cell editor for the MRC power grid) -->
     <div class="mpick-scrim" id="mpickScrim" onclick="closeMpick()"></div>

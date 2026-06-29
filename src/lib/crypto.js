@@ -26,6 +26,30 @@ export async function deriveKey(passcode, salt) {
   );
 }
 
+// Iteration count for the BACKUP key. Much heavier than the on-device passcode
+// (above): the backup file is portable and can be attacked offline at leisure, so
+// derivation must be costly. 600k is the OWASP floor for PBKDF2-HMAC-SHA256.
+// (Argon2 would be preferable but is not in Web Crypto.) The actual count used is
+// always read back from the envelope's kdf.iterations, so this can be raised later
+// without breaking older backups.
+export const BACKUP_ITERATIONS = 600_000;
+
+/**
+ * Derive the AES-GCM key for a backup file from the user's recovery passphrase.
+ * Unlike deriveKey, the iteration count is explicit so it travels in the envelope
+ * and stays forward-compatible.
+ */
+export async function deriveBackupKey(passphrase, salt, iterations = BACKUP_ITERATIONS) {
+  const base = await crypto.subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+    base,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
 export async function encryptObj(key, obj) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(JSON.stringify(obj)));

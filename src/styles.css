@@ -309,7 +309,30 @@ body{font-family:'IBM Plex Sans',system-ui,sans-serif;
 .formbtns{display:flex;gap:10px;padding:14px 20px;border-top:1px solid var(--line);background:var(--card2)}
 .btn{flex:1;height:46px;border-radius:13px;border:none;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer}
 .btn.ghost{background:var(--card);border:1px solid var(--line);color:var(--muted)}.btn.primary{background:var(--teal);color:#fff}
+.btn.primary.danger{background:var(--red)}
 .btn:active{transform:scale(.98)}
+
+/* Today-screen backup nudge */
+.backup-nudge{align-items:center;gap:9px;margin:0 0 12px;padding:10px 13px;border-radius:13px;cursor:pointer;
+  background:var(--card);border:1px solid var(--line);font-size:12.5px;color:var(--ink2)}
+.backup-nudge.warn{background:var(--amber-soft);border-color:#ecd9b2;color:#6f4a0a}
+.backup-nudge .bn-i{font-size:15px;flex:0 0 auto}
+.backup-nudge>div{flex:1;min-width:0}
+.backup-nudge .bn-go{font-weight:700;color:var(--teal);flex:0 0 auto;font-size:12px}
+.backup-nudge.warn .bn-go{color:#6f4a0a}
+
+/* Backup & restore sheet */
+.bk-sect{margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
+.bk-sect-h{font-size:14px;font-weight:700;color:var(--ink);margin-bottom:6px}
+.bk-note{font-size:11.5px;line-height:1.5;color:var(--muted);margin-bottom:12px}
+.bk-file{font-size:11.5px;color:var(--muted);margin:8px 0}
+.bk-preview{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:12px 14px;margin-bottom:12px}
+.bk-pv-h{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin-bottom:8px}
+.bk-pv-row{display:flex;justify-content:space-between;font-size:13px;color:var(--ink2);padding:3px 0}
+.bk-warn{background:var(--amber-soft);border:1px solid #ecd9b2;color:#6f4a0a;font-size:12px;line-height:1.5;
+  border-radius:11px;padding:10px 12px;margin-bottom:12px}
+.bk-ok{background:#e6f2ea;border:1px solid #bfe0d0;color:#0E7C6B;font-size:12.5px;line-height:1.5;
+  border-radius:11px;padding:10px 12px;margin-bottom:12px}
 
 .toast{position:absolute;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;
   font-size:13px;font-weight:500;padding:11px 18px;border-radius:13px;z-index:40;opacity:0;transition:.25s;

@@ -28,6 +28,17 @@ minute at the bedside. Data is entered the night before via the **intake** scree
    reach the store when the user presses commit. Do not auto-apply parsed values.
 5. **Triage colour is derived, not authored.** It comes from `src/lib/diff.js →
    computeTriage`. Don't set `patient.triage` by hand in feature code.
+6. **Backups are always encrypted, never auto-uploaded, and undoable.** The backup
+   file (`src/lib/backup.js`) is a single envelope encrypted as a whole — no plaintext
+   patient data is ever written to it, and the app NEVER uploads or transmits it (the
+   user downloads and keeps it themselves). It is encrypted under a SEPARATE **recovery
+   passphrase** that is independent of the daily 6-digit passcode, must be strong
+   (`passphraseStrength`), is derived with a much heavier KDF (`deriveBackupKey`,
+   600k PBKDF2 vs 150k on-device), and is NEVER stored by the app. Export must
+   verify-after-write (decrypt the produced bytes back) before reporting success.
+   Restore must `store.replaceVault` — which snapshots the current vault to
+   `__prerestore` FIRST so the restore is undoable (`store.undoRestore`) — and must
+   never lose data.
 
 ## Architecture (where things live)
 ```
@@ -37,7 +48,10 @@ src/styles.css      design tokens + styles (IBM Plex, the teal/ink palette).
 src/lib/
   schema.js         newPatient() factory + seed roster. THE record shape lives here.
   crypto.js         passcode → AES-GCM key; encrypt/decrypt. (Web Crypto)
-  store.js          encrypted IndexedDB vault: setup/unlock/save/all/wipe.
+                    + deriveBackupKey (heavier KDF for the backup file).
+  store.js          encrypted IndexedDB vault: setup/unlock/save/all/wipe;
+                    replaceVault/undoRestore (pre-restore snapshot). [tested]
+  backup.js         encrypted backup envelope: create/read/validate.   [tested]
   deid.js           local de-identification (pure).            [tested]
   parser.js         cloudParse + heuristicParse fallback.      [tested]
   diff.js           triage, digest, and the commit pipeline.   [tested]
@@ -203,6 +217,26 @@ npm run build    # -> dist/
       after upgrade — they are not lost.) Seed roster now uses real canonical full
       names (the Roman-`I` → numeral-`1` gotcha is fixed). "reset demo data" reseeds
       patients with real names AND resets the hospital list to the seed.
+- **Encrypted backup & restore** — ✅ DONE. The gate before real patient data. A
+  focused "Backup & restore" sheet (Today header 💾 — NOT a full Settings screen)
+  exports the whole vault (all patients + the hospital list) as ONE encrypted file
+  the user downloads and keeps; the app never uploads it. Envelope:
+  `{ format:'rounds-backup', version, createdAt, patientCount, kdf:{salt,iterations},
+  cipher:{iv,ct} }` — header is non-secret (count/date only), `ct` is the whole
+  payload AES-GCM-encrypted under the recovery passphrase. All format/crypto is pure
+  & tested in `lib/backup.js` (`createBackup`, `readBackup`, `validatePayload`,
+  `passphraseStrength`, typed `BackupError` for wrong-passphrase / bad-format /
+  bad-version / corrupt / bad-payload). KDF: PBKDF2-SHA256 **600k** iters (vs 150k
+  on-device) because the file is portable + offline-attackable; the count travels in
+  the envelope so it can be raised later. Export VERIFIES-AFTER-WRITE (decrypts the
+  produced bytes back) before reporting success. RESTORE = **replace** both patients
+  and hospital list, but `store.replaceVault` snapshots the current vault to
+  `__prerestore` FIRST (raw ciphertext, no decryption) so it is one-step undoable
+  (`store.undoRestore`); restored records are re-encrypted under the CURRENT on-device
+  key, so the FRESH-DEVICE path works (new passcode → restore → readable). The daily
+  passcode/key is never touched. `lib/store.js` adds `replaceVault`, `undoRestore`,
+  `hasPrerestore`, `get/setLastBackupAt` (non-secret timestamp → gentle Today nudge).
+  See invariant #6.
 - **Commute / prep mode** — calm read-only overnight diff.
 - **Settings** — store the model API key in the encrypted vault and wire `getApiKey` in
   `main.js` to it (currently returns null → offline parser). See README "Cloud parsing".
