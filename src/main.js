@@ -44,16 +44,22 @@ const esc = (s) => String(s == null ? '' : s).replace(/[<>&]/g, (c) => ({ '<': '
 // (e.g. onclick="f('...')") — chip labels include apostrophes ("Todd's paresis").
 const jsq = (s) => String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
+// Real current date, in the two formats the app uses.
+const pad2 = (n) => String(n).padStart(2, '0');
+const todayMMDD = () => { const d = new Date(); return `${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`; };
+const todayHeader = () => new Date().toLocaleDateString('en-PH', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/,/g, ' ·').toUpperCase();
+
 const SAMPLE = `Ramon dela Cruz rm 408 — repeat Na came back 126, still severe headache, no new weakness. BP 150/88, HR 80.
 Aurora Mendoza 412: moved bowels this morning, finally. BP 150/86, sleeping better.
 Efren Villaraza rm 302 — single breath count down to 14, RR up to 26, sats 94%. Flagging for review.
 Carmela Soriano 310 afebrile overnight, headache improving.`;
 
 // ============================ lock / unlock ============================
-let entered = '', isSetup = false;
+let entered = '', isSetup = false, pendingCode = null;
 
 async function bootLock() {
   isSetup = !(await store.isInitialized());
+  pendingCode = null;
   $('lockTitle').textContent = isSetup ? 'Set a passcode' : 'Enter passcode';
   $('lockSub').innerHTML = isSetup
     ? 'This key encrypts every record on this phone.<br>Nothing is stored unlocked.'
@@ -78,7 +84,27 @@ function renderPin() {
 function tap(d) { if (entered.length >= 6) return; entered += d; renderPin(); if (entered.length === 6) submitPin(); }
 async function submitPin() {
   const code = entered;
-  if (isSetup) { await store.setup(code, seedPatients()); entered = ''; await enterApp(); }
+  if (isSetup) {
+    // A mistyped passcode at setup = an unreadable vault forever (no recovery by
+    // design), so require the same 6 digits twice before deriving the key.
+    if (pendingCode === null) {
+      pendingCode = code; entered = '';
+      $('lockTitle').textContent = 'Confirm passcode';
+      $('lockSub').innerHTML = 'Enter the same 6 digits again.<br>If you forget it there is no recovery — only your backup file.';
+      renderPin();
+      return;
+    }
+    if (code !== pendingCode) {
+      entered = '';
+      $('pinDots').className = 'pin err';
+      $('lockHint').textContent = "Passcodes didn't match — starting over";
+      setTimeout(() => bootLock(), 800);
+      return;
+    }
+    await store.setup(code, seedPatients());
+    pendingCode = null; entered = '';
+    await enterApp();
+  }
   else {
     const ok = await store.unlock(code);
     if (ok) { entered = ''; await enterApp(); }
@@ -88,7 +114,9 @@ async function submitPin() {
 async function enterApp() {
   await loadPatients();
   show('today'); renderToday();
-  if ($('rawText') && !$('rawText').value) $('rawText').value = SAMPLE;
+  // Prefill the walkthrough sample only while the DEMO roster is present —
+  // once real patients replace it, the intake box starts empty.
+  if ($('rawText') && !$('rawText').value && state.byId['p_ramon']) $('rawText').value = SAMPLE;
 }
 function lockApp() { clearClockTimer(); store.lock(); entered = ''; $('lockHint').textContent = ''; bootLock(); show('lock'); }
 
@@ -125,7 +153,7 @@ function renderToday() {
   const reds = pts.filter((p) => p.triage === 'r').length;
   const ambers = pts.filter((p) => p.triage === 'a').length;
   const hosps = [...new Set(pts.map((p) => p.hospital))].length;
-  $('todayDate').textContent = `TUE · 16 JUN · ${pts.length} PATIENTS`;
+  $('todayDate').textContent = `${todayHeader()} · ${pts.length} PATIENT${pts.length === 1 ? '' : 'S'}`;
 
   const changed = buildDigest(pts);
   $('digest').innerHTML = changed.length
@@ -401,7 +429,7 @@ async function motorRecord() {
   const d = ensureDraft(p);
   const cells = { ...d.cells };
   if (!Object.keys(cells).length) { toast('Grade at least one muscle first'); return; }
-  p.motorExams = [...(p.motorExams || []), { date: 'today', cells }];
+  p.motorExams = [...(p.motorExams || []), { date: todayMMDD(), cells }];
   await store.savePatient(p);                  // encrypted vault — invariant #2
   motorDraft = null;                           // rebuild draft from the new latest exam
   refreshMotor();
@@ -584,7 +612,11 @@ async function saveSeizure() {
   if (!p || !szDraft) return;
   const onsetRaw = $('sz_onset').value;
   if (!onsetRaw) { toast('Onset date & time is required'); return; }
-  const onset = new Date(onsetRaw).toISOString();
+  const onsetDate = new Date(onsetRaw);
+  if (isNaN(onsetDate.getTime())) { toast('Onset date & time is invalid'); return; }
+  // A future onset would silently corrupt the "seizure-free Xh" interval.
+  if (onsetDate.getTime() > Date.now() + 5 * 60 * 1000) { toast('Onset is in the future — check the date & time'); return; }
+  const onset = onsetDate.toISOString();
   const durationSec = (parseInt($('sz_min').value, 10) || 0) * 60 + (parseInt($('sz_sec').value, 10) || 0);
   if (durationSec <= 0) { toast('Duration is required'); return; }
   if (!szDraft.type) { toast('Seizure type is required'); return; }
@@ -869,6 +901,9 @@ async function pick(ai, oi) {
   const rows = document.querySelectorAll('#rcAsk .askrow');
   const btns = rows[ai].querySelectorAll('.toggle button');
   btns.forEach((b) => (b.className = '')); btns[oi].className = 'on ' + p.ask[ai].k;
+  // The seizure block surfaces a one-tap "log it" shortcut when the Ask toggle
+  // reads "Yes" — refresh it so the shortcut appears/disappears immediately.
+  if (/^any seizure/i.test(p.ask[ai].q)) refreshSeizures();
   await store.savePatient(p); // persist the answer, encrypted
 }
 
@@ -988,7 +1023,7 @@ function renderTray(parsed, provider) {
     const pid = state.deid.map[o.token]; const p = pid && state.byId[pid]; if (!p) return;
     const ch = [];
     const add = (field, label, oldv, newv, cls, crit) => { if (newv == null || newv === '') return; ch.push({ field, label, old: String(oldv), new: String(newv), cls: cls || '', crit: !!crit, apply: true }); };
-    if (o.na != null) add('na', 'Sodium', p.na[p.na.length - 1], o.na, o.na < 130 ? 'bad' : o.na < 135 ? 'warn' : 'good', o.na < 130);
+    if (o.na != null) add('na', 'Sodium', (p.na || []).length ? p.na[p.na.length - 1] : '—', o.na, o.na < 130 ? 'bad' : o.na < 135 ? 'warn' : 'good', o.na < 130);
     if (o.bp) add('bp', 'BP', cellOf(p, 'BP'), o.bp);
     if (o.hr) add('hr', 'HR', cellOf(p, 'HR'), o.hr);
     if (o.rr) add('rr', 'RR', cellOf(p, 'RR'), o.rr, (+o.rr >= 24 ? 'warn' : ''), +o.rr >= 24);
@@ -1024,7 +1059,7 @@ async function commitReview() {
   for (const g of state.review) {
     const p = state.byId[g.patientId];
     const before = p.snapshots.length;
-    commitPatient(p, g.changes, '06/17');       // tested module does the work
+    commitPatient(p, g.changes, todayMMDD());   // tested module does the work
     if (p.snapshots.length > before) { applied += g.changes.filter((c) => c.apply).length; await store.savePatient(p); }
   }
   $('deidWrap').innerHTML = ''; $('trayWrap').innerHTML = ''; state.deid = null;
@@ -1034,7 +1069,31 @@ async function commitReview() {
 }
 
 // ============================ Add / reset ============================
-function openAdd() { 
+function closeAdd() {
+  $('scrim2').classList.remove('show'); $('addsheet').classList.remove('show');
+  state.editingId = null;
+}
+
+// The Add-Patient dropdown lists hospitals by FULL NAME (where a wrong choice has
+// consequences), in route order, from the managed list.
+function fillHospitalSelect() {
+  const sel = $('f_hosp'); if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = state.hospitals.map((h) => `<option>${esc(h.name)}</option>`).join('');
+  if (state.hospitals.some((h) => h.name === prev)) sel.value = prev;
+}
+
+async function resetDemo() {
+  await store.wipePatients();
+  // Reset the hospital list to the real seed too, so the reseeded demo patients
+  // (which use real full names) group correctly under the listed hospitals.
+  state.hospitals = SEED_HOSPITALS.map((h) => ({ ...h }));
+  await store.setHospitals(state.hospitals);
+  for (const p of seedPatients()) await store.savePatient(p);
+  await loadPatients(); renderToday(); toast('Demo data reseeded', '✓');
+}
+
+function openAdd() {
   state.editingId = null;
   $('addSheetTitle').textContent = 'Add patient';
   $('btnDeletePatient').style.display = 'none';
@@ -1075,9 +1134,10 @@ function openEdit() {
 async function savePatient() {
   const g = (id) => $(id).value.trim();
   const name = g('f_name'); if (!name) { toast('Name is required'); return; }
-  
+
+  const wasEdit = !!state.editingId;
   let p;
-  if (state.editingId) {
+  if (wasEdit) {
     // Edit mode: mutate the existing patient record
     p = state.byId[state.editingId];
     p.name = name;
@@ -1099,14 +1159,14 @@ async function savePatient() {
   }
 
   await store.savePatient(p); // store.js encrypts it before saving
-  closeAdd(); 
-  await loadPatients(); 
-  renderToday(); 
-  
+  closeAdd();
+  await loadPatients();
+  renderToday();
+
   // If we edited from the Round Card, refresh the card UI seamlessly
-  if (state.editingId && state.currentId === state.editingId) openCard(p.id); 
-  
-  toast(state.editingId ? 'Patient updated' : 'Encrypted & saved', '✓');
+  if (wasEdit && state.currentId === p.id) openCard(p.id);
+
+  toast(wasEdit ? 'Patient updated' : 'Encrypted & saved', '✓');
 }
 
 async function doDeletePatient() {
@@ -1215,6 +1275,10 @@ function closeBackup() { $('bkScrim').classList.remove('show'); $('bksheet').cla
 function pickBackupFile() { $('bkFile').click(); }
 
 function renderBackup() {
+  // Re-rendering rebuilds the inputs — carry typed passphrases across so picking
+  // a file (which re-renders) doesn't wipe what the user already entered.
+  const keepPass = $('bk_pass') ? $('bk_pass').value : '';
+  const keepRpass = $('bk_rpass') ? $('bk_rpass').value : '';
   const lastTxt = state.lastBackupAt
     ? `Last backup: <b>${esc(daysAgoLabel(state.lastBackupAt))}</b>.`
     : 'You have <b>no backup yet</b>.';
@@ -1272,6 +1336,9 @@ function renderBackup() {
     </div>
 
     <div class="formbtns"><button class="btn ghost" onclick="closeBackup()">Close</button></div>`;
+
+  if ($('bk_pass') && keepPass) $('bk_pass').value = keepPass;
+  if ($('bk_rpass') && keepRpass) $('bk_rpass').value = keepRpass;
 }
 
 function downloadText(text, filename) {
@@ -1281,6 +1348,30 @@ function downloadText(text, filename) {
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * Hand the backup file to the user. In the INSTALLED iOS PWA (standalone mode) a
+ * programmatic anchor download is unreliable and can fail silently — which would
+ * let us record "backed up" for a file that never landed anywhere. There we use
+ * the native share sheet ("Save to Files"); everywhere else the normal download.
+ * Returns false if the user cancelled (no backup happened — don't record one).
+ * Sharing goes to a destination THE USER picks; the app itself uploads nothing.
+ */
+async function deliverBackupFile(text, filename) {
+  const standalone = navigator.standalone === true; // iOS home-screen install
+  if (standalone && navigator.canShare) {
+    const file = new File([text], filename, { type: 'application/json' });
+    if (navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); return true; }
+      catch (e) {
+        if (e && e.name === 'AbortError') return false; // user cancelled
+        // share failed for another reason — fall through to the anchor download
+      }
+    }
+  }
+  downloadText(text, filename);
+  return true;
 }
 
 async function doBackupExport() {
@@ -1304,7 +1395,8 @@ async function doBackupExport() {
     toast('Backup failed verification — nothing was saved.');
     return;
   }
-  downloadText(text, `rounds-backup-${new Date().toISOString().slice(0, 10)}.rcbackup`);
+  const delivered = await deliverBackupFile(text, `rounds-backup-${new Date().toISOString().slice(0, 10)}.rcbackup`);
+  if (!delivered) { toast('Backup cancelled — nothing was saved.'); return; }
   const ts = Date.now();
   await store.setLastBackupAt(ts);
   state.lastBackupAt = ts;

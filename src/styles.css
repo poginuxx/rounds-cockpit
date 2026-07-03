@@ -310,6 +310,7 @@ body{font-family:'IBM Plex Sans',system-ui,sans-serif;
 .btn{flex:1;height:46px;border-radius:13px;border:none;font-size:14px;font-weight:600;font-family:inherit;cursor:pointer}
 .btn.ghost{background:var(--card);border:1px solid var(--line);color:var(--muted)}.btn.primary{background:var(--teal);color:#fff}
 .btn.primary.danger{background:var(--red)}
+.btn.ghost.danger{background:var(--red-soft);border-color:#f2cfcb;color:#a4322a;flex:0 0 auto;padding:0 16px}
 .btn:active{transform:scale(.98)}
 
 /* Today-screen backup nudge */
@@ -415,5 +416,8 @@ body{font-family:'IBM Plex Sans',system-ui,sans-serif;
 .in-empty{margin:30px 24px;text-align:center;color:var(--muted);font-size:13px;line-height:1.6}
 
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
-@media (max-width:440px){body{padding:0}.phone{width:100vw;max-width:100vw;height:100vh;max-height:100vh;border-radius:0;box-shadow:none}
+@media (max-width:440px){body{padding:0}
+  .phone{width:100vw;max-width:100vw;height:100vh;max-height:100vh;border-radius:0;box-shadow:none}
+  /* dynamic viewport units track the browser chrome on iOS/Android (fallback above) */
+  @supports (height:100dvh){.phone{height:100dvh;max-height:100dvh}}
   .caption{display:none}.notch{display:none}.statusbar{display:none}}
