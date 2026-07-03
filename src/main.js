@@ -37,7 +37,7 @@ const getApiKey = async () => API_KEY;
 window.setApiKey = (k) => { API_KEY = k; }; // for manual testing in the console
 
 // ---- in-memory view state (decrypted records live here while unlocked) ----
-const state = { patients: [], byId: {}, currentId: null, deid: null, review: [], hospitals: [], lastBackupAt: null };
+const state = { patients: [], byId: {}, currentId: null, deid: null, review: [], hospitals: [], lastBackupAt: null, editingId: null };
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? '' : s).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
 // Escape a string for safe interpolation inside a single-quoted inline JS arg
@@ -1034,42 +1034,94 @@ async function commitReview() {
 }
 
 // ============================ Add / reset ============================
-function openAdd() { fillHospitalSelect(); $('scrim2').classList.add('show'); $('addsheet').classList.add('show'); }
-function closeAdd() { $('scrim2').classList.remove('show'); $('addsheet').classList.remove('show'); }
-
-// The Add-Patient dropdown lists hospitals by FULL NAME (where a wrong choice has
-// consequences), in route order, from the managed list.
-function fillHospitalSelect() {
-  const sel = $('f_hosp'); if (!sel) return;
-  const prev = sel.value;
-  sel.innerHTML = state.hospitals.map((h) => `<option>${esc(h.name)}</option>`).join('');
-  if (state.hospitals.some((h) => h.name === prev)) sel.value = prev;
+function openAdd() { 
+  state.editingId = null;
+  $('addSheetTitle').textContent = 'Add patient';
+  $('btnDeletePatient').style.display = 'none';
+  
+  ['f_name', 'f_age', 'f_day', 'f_dx', 'f_room'].forEach((i) => ($(i).value = ''));
+  $('f_sex').value = 'M';
+  
+  fillHospitalSelect(); 
+  $('scrim2').classList.add('show'); 
+  $('addsheet').classList.add('show'); 
 }
+
+// Opens the sheet pre-filled with the current patient's data
+function openEdit() {
+  const p = state.byId[state.currentId]; 
+  if (!p) return;
+  
+  state.editingId = p.id;
+  $('addSheetTitle').textContent = 'Edit patient';
+  $('btnDeletePatient').style.display = 'block';
+
+  $('f_name').value = p.name || '';
+  $('f_age').value = p.age || '';
+  $('f_sex').value = p.sex || 'M';
+  $('f_day').value = p.day || '';
+  $('f_dx').value = p.dx || '';
+  $('f_room').value = p.room || '';
+
+  fillHospitalSelect();
+  if (state.hospitals.some((h) => h.name === p.hospital)) {
+    $('f_hosp').value = p.hospital;
+  }
+
+  $('scrim2').classList.add('show'); 
+  $('addsheet').classList.add('show');
+}
+
 async function savePatient() {
   const g = (id) => $(id).value.trim();
   const name = g('f_name'); if (!name) { toast('Name is required'); return; }
-  // No sodium captured at add time — not every patient needs Na monitoring, and
-  // labs arrive later via the nightly intake. Triage stays green until real data
-  // lands (computeTriage derives it on the next commit).
-  const p = newPatient({
-    name, age: g('f_age'), sex: g('f_sex'), dx: g('f_dx'), day: g('f_day') || '1',
-    hospital: g('f_hosp'), room: g('f_room'), triage: 'g',
-    scores: [{ l: 'GCS', v: '15', a: '' }],
-    ask: [{ q: 'Bowel movement', s: '', t: ['Yes', 'No'], on: 0, k: 'pos' }, { q: 'Sleep', s: '', t: ['Good', 'Poor'], on: 0, k: 'pos' }],
-    vitals: [['BP', '—'], ['HR', '—'], ['RR', '—'], ['TEMP', '—'], ['SPO₂', '—']],
-  });
-  await store.savePatient(p);
-  ['f_name', 'f_age', 'f_day', 'f_dx', 'f_room'].forEach((i) => ($(i).value = ''));
-  closeAdd(); await loadPatients(); renderToday(); toast('Encrypted & saved', '✓');
+  
+  let p;
+  if (state.editingId) {
+    // Edit mode: mutate the existing patient record
+    p = state.byId[state.editingId];
+    p.name = name;
+    p.age = g('f_age');
+    p.sex = g('f_sex');
+    p.day = g('f_day') || '1';
+    p.dx = g('f_dx');
+    p.hospital = g('f_hosp');
+    p.room = g('f_room');
+  } else {
+    // Add mode: create a brand new record
+    p = newPatient({
+      name, age: g('f_age'), sex: g('f_sex'), dx: g('f_dx'), day: g('f_day') || '1',
+      hospital: g('f_hosp'), room: g('f_room'), triage: 'g',
+      scores: [{ l: 'GCS', v: '15', a: '' }],
+      ask: [{ q: 'Bowel movement', s: '', t: ['Yes', 'No'], on: 0, k: 'pos' }, { q: 'Sleep', s: '', t: ['Good', 'Poor'], on: 0, k: 'pos' }],
+      vitals: [['BP', '—'], ['HR', '—'], ['RR', '—'], ['TEMP', '—'], ['SPO₂', '—']],
+    });
+  }
+
+  await store.savePatient(p); // store.js encrypts it before saving
+  closeAdd(); 
+  await loadPatients(); 
+  renderToday(); 
+  
+  // If we edited from the Round Card, refresh the card UI seamlessly
+  if (state.editingId && state.currentId === state.editingId) openCard(p.id); 
+  
+  toast(state.editingId ? 'Patient updated' : 'Encrypted & saved', '✓');
 }
-async function resetDemo() {
-  await store.wipePatients();
-  // Reset the hospital list to the real seed too, so the reseeded demo patients
-  // (which use real full names) group correctly under the listed hospitals.
-  state.hospitals = SEED_HOSPITALS.map((h) => ({ ...h }));
-  await store.setHospitals(state.hospitals);
-  for (const p of seedPatients()) await store.savePatient(p);
-  await loadPatients(); renderToday(); toast('Demo data reseeded', '✓');
+
+async function doDeletePatient() {
+  if (!state.editingId) return;
+  const p = state.byId[state.editingId];
+  
+  // Native confirm is ugly but perfect for a fast, zero-dependency safety check
+  if (!confirm(`Are you sure you want to delete ${p.name}?\n\nThis will permanently remove their record and history from this device.`)) return;
+
+  await store.deletePatient(state.editingId);
+  closeAdd();
+  closeCard(); // Close the Round Card since the patient no longer exists
+  await loadPatients();
+  renderToday();
+  toast('Patient deleted');
 }
 
 // ============================ Manage hospitals ============================
@@ -1319,7 +1371,7 @@ let tt;
 function toast(m, ok) { const t = $('toast'); t.innerHTML = (ok ? `<span class="ok">${ok}</span>` : '') + m; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 1800); }
 
 // ---- expose handlers for inline onclick in index.html ----
-Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, closeTimeline, pick, neuroStep, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, resetDemo, toast, motorPick, motorSet, motorSetAll5, motorRecord, closeMpick, openSeizureForm, closeSeizureForm, saveSeizure, szPickType, szPickTrigger, szToggleFeature, szSetWitnessed, szSetResponded, openStrokeForm, closeStrokeForm, saveStrokeClock, scPickType, deactivateStrokeClock, handleOcrFile, retakeOcr, openHospitals, closeHospitals, hospAdd, hospRemove, hospMove,
+Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, closeTimeline, pick, neuroStep, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, openEdit, doDeletePatient,resetDemo, toast, motorPick, motorSet, motorSetAll5, motorRecord, closeMpick, openSeizureForm, closeSeizureForm, saveSeizure, szPickType, szPickTrigger, szToggleFeature, szSetWitnessed, szSetResponded, openStrokeForm, closeStrokeForm, saveStrokeClock, scPickType, deactivateStrokeClock, handleOcrFile, retakeOcr, openHospitals, closeHospitals, hospAdd, hospRemove, hospMove,
   openBackup, closeBackup, pickBackupFile, doBackupExport, handleBackupFile,
   doRestorePreview, doRestoreApply, doUndoRestore, cancelRestore });
 

@@ -93,6 +93,7 @@
           <div class="top">
             <div><h2 id="rcName"></h2><div class="dx" id="rcDx"></div><div class="loc" id="rcLoc"></div></div>
             <div class="rc-actions">
+             <button class="rc-tl" onclick="openEdit()" title="Edit patient details"><span>✏️</span>Edit</button>
               <button class="rc-tl" onclick="openTimeline()" title="Admission timeline"><span>🕒</span>History</button>
               <button class="rc-close" onclick="closeCard()">✕</button>
             </div>
@@ -133,7 +134,7 @@
     <div class="scrim" id="scrim2" onclick="closeAdd()"></div>
     <div class="addsheet" id="addsheet">
       <div class="grab"></div>
-      <h2>Add patient</h2>
+      <h2 id="addSheetTitle">Add patient</h2>
       <div class="lead">Core fields now — rich data (labs, meds, Ask) arrives via the nightly intake screen (step 2).</div>
       <div class="form">
         <div class="field"><label>Name</label><input id="f_name" placeholder="Juan Santos"></div>
@@ -146,7 +147,10 @@
         <div class="field"><label>Hospital <a class="field-link" onclick="closeAdd();openHospitals()">Manage</a></label><select id="f_hosp"></select></div>
         <div class="field"><label>Room</label><input id="f_room" placeholder="305"></div>
       </div>
-      <div class="formbtns"><button class="btn ghost" onclick="closeAdd()">Cancel</button><button class="btn primary" onclick="savePatient()">Encrypt &amp; save</button></div>
+      <div class="formbtns">
+        <button class="btn ghost danger" id="btnDeletePatient" style="display:none; margin-right:auto;" onclick="doDeletePatient()">Delete</button>
+        <button class="btn ghost" onclick="closeAdd()">Cancel</button>
+        <button class="btn primary" onclick="savePatient()">Encrypt &amp; save</button></div>
     </div>
 
     <!-- manage-hospitals sheet: the user-managed hospital list (filled by JS) -->
