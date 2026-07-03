@@ -28,7 +28,16 @@
       "Bash(grep -ao \"corePath[^;]\\\\{0,120\\\\}\" node_modules/tesseract.js/dist/worker.min.js)",
       "Bash(grep -ao \"[a-zA-Z]\\\\{0,30\\\\}\\\\\\(relaxedsimd\\\\|simdSupport\\\\|relaxedSimd\\\\|SIMD\\\\|-lstm\\\\|oem\\\\\\)[a-zA-Z0-9?:.'\\\\\" =-]\\\\{0,60\\\\}\" node_modules/tesseract.js/dist/worker.min.js)",
       "Bash(node -e ' *)",
-      "Bash(git diff *)"
+      "Bash(git diff *)",
+      "Bash(git remote *)",
+      "Bash(git fetch *)",
+      "Bash(git ls-remote *)",
+      "Bash(git branch *)",
+      "Bash(git push *)",
+      "Bash(node -e \"console.log\\(new Date\\(\\).toLocaleDateString\\('en-PH',{weekday:'short',day:'numeric',month:'short'}\\).replace\\(/,/g,' ·'\\).toUpperCase\\(\\)\\)\")",
+      "Skill(claude-api)",
+      "Skill(claude-api:*)",
+      "Bash(gh pr *)"
     ]
   }
 }
