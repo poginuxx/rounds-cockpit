@@ -144,6 +144,7 @@
           <div class="field"><label>Day</label><input id="f_day" inputmode="numeric" placeholder="1"></div>
         </div>
         <div class="field"><label>Diagnosis</label><input id="f_dx" placeholder="Ischemic stroke"></div>
+        <div class="field"><label>Detail <small style="font-weight:400;color:var(--faint)">(optional)</small></label><input id="f_detail" placeholder="e.g. Hunt-Hess 3"></div>
         <div class="field"><label>Hospital <a class="field-link" onclick="closeAdd();openHospitals()">Manage</a></label><select id="f_hosp"></select></div>
         <div class="field"><label>Room</label><input id="f_room" placeholder="305"></div>
       </div>
@@ -174,6 +175,15 @@
     <!-- stroke-clock activation form: the ONLY writer of strokeClock (filled by JS) -->
     <div class="scrim" id="scScrim" onclick="closeStrokeForm()"></div>
     <div class="addsheet" id="scsheet"></div>
+
+    <!-- generic value-edit sheet: bedside tap-to-edit for Na/K/osmo/vitals/scores
+         (filled by JS) — the fast single-value path, separate from nightly Intake -->
+    <div class="scrim" id="editScrim" onclick="closeValueEdit()"></div>
+    <div class="addsheet" id="editsheet"></div>
+
+    <!-- medication add/edit/delete sheet (filled by JS) -->
+    <div class="scrim" id="medScrim" onclick="closeMedForm()"></div>
+    <div class="addsheet" id="medsheet"></div>
 
     <div class="toast" id="toast"></div>
   </div>

@@ -12,7 +12,7 @@
 import * as store from './lib/store.js';
 import { deidentify } from './lib/deid.js';
 import { parseUpdate } from './lib/parser.js';
-import { commitPatient, buildDigest, buildTimeline, neuroStatus } from './lib/diff.js';
+import { commitPatient, buildDigest, buildTimeline, neuroStatus, applyChange, computeTriage, upsertSnapshot } from './lib/diff.js';
 import { newPatient, seedPatients } from './lib/schema.js';
 import {
   SEED_HOSPITALS, addHospital, removeHospital, moveHospital, abbrFor,
@@ -220,16 +220,30 @@ function openCard(id) {
       <div class="toggle">${a.t.map((opt, oi) => `<button class="${oi === a.on ? 'on ' + a.k : ''}" onclick="pick(${ai},${oi})">${esc(opt)}</button>`).join('')}</div></div>`).join('');
   const hasNa = (p.na || []).length > 0;
   const naLast = hasNa ? p.na[p.na.length - 1] : null, naCls = naLast == null ? '' : naLast < 135 ? 'bad' : (naLast < 137 ? 'warn' : '');
-  const naCell = hasNa ? `
-    <div class="labcell wide"><div class="lh"><span class="nm">Sodium · trend</span><span class="val ${naCls}">${naLast}<small> mmol/L</small></span></div>
-      ${p.na.length >= 2 ? `<div class="spark">${sparkline(p.na)}</div>
+  // Always render the Sodium cell (even at zero readings) and make it tappable —
+  // previously a freshly Add-Patient-created record with no Na yet had no way to
+  // ever enter the FIRST reading except by routing free text through Intake.
+  const naCell = `
+    <div class="labcell wide" onclick="openValueEdit('na','na','Sodium (Na)','${naLast == null ? '' : naLast}')"><div class="lh"><span class="nm">Sodium · trend</span><span class="val ${naCls}">${naLast ?? '—'}<small> mmol/L</small></span></div>
+      ${hasNa && p.na.length >= 2 ? `<div class="spark">${sparkline(p.na)}</div>
       <div class="sparkrow"><span class="seq">${esc(p.naLabel)}</span><span class="seq">band 135–145</span></div>`
-        : `<div class="seq mono" style="font-size:11px;color:var(--faint);margin-top:6px">one reading so far — trend builds as you commit updates</div>`}</div>` : '';
+        : hasNa ? `<div class="seq mono" style="font-size:11px;color:var(--faint);margin-top:6px">one reading so far — trend builds as you commit updates</div>`
+        : `<div class="seq mono" style="font-size:11px;color:var(--faint);margin-top:6px">tap to add the first reading</div>`}</div>`;
+  // Potassium's "bad" flag is derived from the value against its own printed band
+  // (3.5–5.1) — the prior code checked p.kbad, a field nothing ever set, so a
+  // critically abnormal K never actually got flagged red.
+  const kNum = parseFloat(p.k.v);
+  const kCls = !isNaN(kNum) && (kNum < 3.5 || kNum > 5.1) ? 'bad' : '';
   $('rcLabs').innerHTML = `${naCell}
-    <div class="labcell"><div class="lh"><span class="nm">Potassium</span></div><div class="val ${p.kbad ? 'bad' : ''}">${esc(p.k.v)}<small> mmol/L</small></div><div class="seq mono" style="font-size:10px;color:var(--faint);margin-top:4px">${esc(p.k.s)}</div></div>
-    <div class="labcell"><div class="lh"><span class="nm">Serum osmo</span></div><div class="val ${p.osmo.v !== '—' && +p.osmo.v < 275 ? 'warn' : ''}">${esc(p.osmo.v)}</div><div class="seq mono" style="font-size:10px;color:var(--faint);margin-top:4px">${esc(p.osmo.s)}</div></div>`;
-  $('rcVitals').innerHTML = p.vitals.map((v) => `<div class="vital"><div class="k">${esc(v[0])}</div><div class="v">${esc(v[1])}</div></div>`).join('');
-  $('rcMeds').innerHTML = p.meds.map((m) => `<div class="med"><div class="mn">${esc(m.n)} <small>· ${esc(m.d)}</small></div><div class="day ${m.w ? 'warn' : ''}">${esc(m.day)}</div></div>`).join('');
+    <div class="labcell" onclick="openValueEdit('k','k','Potassium (K)','${jsq(p.k.v)}','${jsq(p.k.s)}')"><div class="lh"><span class="nm">Potassium</span></div><div class="val ${kCls}">${esc(p.k.v)}<small> mmol/L</small></div><div class="seq mono" style="font-size:10px;color:var(--faint);margin-top:4px">${esc(p.k.s)}</div></div>
+    <div class="labcell" onclick="openValueEdit('osmo','osmo','Serum osmolality','${jsq(p.osmo.v)}','${jsq(p.osmo.s)}')"><div class="lh"><span class="nm">Serum osmo</span></div><div class="val ${p.osmo.v !== '—' && +p.osmo.v < 275 ? 'warn' : ''}">${esc(p.osmo.v)}</div><div class="seq mono" style="font-size:10px;color:var(--faint);margin-top:4px">${esc(p.osmo.s)}</div></div>`;
+  $('rcVitals').innerHTML = p.vitals.map((v) => {
+    const cfg = VITAL_EDIT.find((x) => x.vkey === v[0]);
+    const click = cfg ? `onclick="openValueEdit('vital','${cfg.field}','${jsq(cfg.label)}','${jsq(v[1])}')"` : '';
+    return `<div class="vital" ${click}><div class="k">${esc(v[0])}</div><div class="v">${esc(v[1])}</div></div>`;
+  }).join('');
+  $('rcMeds').innerHTML = p.meds.map((m, i) => `<div class="med" onclick="openMedForm(${i})"><div class="mn">${esc(m.n)} <small>· ${esc(m.d)}</small></div><div class="day ${m.w ? 'warn' : ''}">${esc(m.day)}</div></div>`).join('')
+    + `<button class="mtool" style="margin-top:2px" onclick="openMedForm(null)">＋ Add medication</button>`;
   const dm = p.doMain;
   $('rcDo').innerHTML = `
     <button class="act primary" onclick="${dm.bill ? "toast('PhilHealth packet — builds in a later step','✓')" : "toast('Order placed · added to note','✓')"}">
@@ -244,10 +258,16 @@ function openCard(id) {
 }
 function closeCard() { clearClockTimer(); closeTimeline(); $('scrim').classList.remove('show'); $('sheet').classList.remove('show'); state.currentId = null; }
 
+// GCS/NIHSS keep their dedicated bedside stepper (see neuroStep) — the generic
+// score editor below only applies to everything else (WFNS, FVC, SZ-FREE, ...).
 function renderScores(p) {
-  $('rcScores').innerHTML = p.scores.map((s) => `
-    <div class="score"><div class="lbl">${s.l}</div>
-    <div class="v ${s.d ? 'delta-bad' : ''}">${s.v}${s.a ? `<span class="arr ${s.a}">${s.a === 'dn' ? '↓' : '↑'}</span>` : ''}</div></div>`).join('');
+  $('rcScores').innerHTML = p.scores.map((s) => {
+    const hasStepper = NEURO_METRICS.some((m) => m.label === s.l);
+    const cls = hasStepper ? 'score' : 'score tap';
+    const click = hasStepper ? '' : `onclick="openValueEdit('score','${jsq(s.l)}','${jsq(s.l)}','${jsq(s.v)}')"`;
+    return `<div class="${cls}" ${click}><div class="lbl">${esc(s.l)}</div>
+    <div class="v ${s.d ? 'delta-bad' : ''}">${esc(s.v)}${s.a ? `<span class="arr ${s.a}">${s.a === 'dn' ? '↓' : '↑'}</span>` : ''}</div></div>`;
+  }).join('');
 }
 
 // ============================ Neuro modules ============================
@@ -907,6 +927,137 @@ async function pick(ai, oi) {
   await store.savePatient(p); // persist the answer, encrypted
 }
 
+// ---------------------------- direct value edit (bedside fast path) ----------------------------
+// A small generic bottom sheet for correcting/entering ONE lab, vital, or score
+// value on the spot — separate from the nightly Intake bulk-paste workflow.
+// Reuses the tested diff.js pipeline (applyChange + computeTriage + upsertSnapshot)
+// so triage stays derived (invariant #5) even for a single bedside tap.
+const VITAL_EDIT = [
+  { field: 'bp', label: 'Blood pressure', vkey: 'BP' },
+  { field: 'hr', label: 'Heart rate', vkey: 'HR' },
+  { field: 'rr', label: 'Respiratory rate', vkey: 'RR' },
+  { field: 'temp', label: 'Temperature', vkey: 'TEMP' },
+  { field: 'spo2', label: 'SpO₂', vkey: 'SPO₂' },
+];
+// Which vital fields feed the snapshot/timeline (see diff.js snapshotOf) — only
+// these (plus 'na') warrant an upsertSnapshot call; BP/HR aren't captured there,
+// and calling it anyway would spuriously create an empty-looking timeline row.
+const SNAPSHOT_VITALS = new Set(['rr', 'spo2', 'temp']);
+
+let valueEdit = null; // { kind:'na'|'vital'|'k'|'osmo'|'score', key, label, value, note }
+
+function openValueEdit(kind, key, label, value, note) {
+  const p = state.byId[state.currentId]; if (!p) return;
+  valueEdit = { kind, key, label, value: value == null ? '' : String(value), note: note == null ? '' : String(note) };
+  $('editsheet').innerHTML = valueEditFormHtml();
+  $('editsheet').classList.add('show');
+  $('editScrim').classList.add('show');
+}
+function closeValueEdit() {
+  $('editsheet').classList.remove('show');
+  $('editScrim').classList.remove('show');
+  valueEdit = null;
+}
+function valueEditFormHtml() {
+  const hasNote = valueEdit.kind === 'k' || valueEdit.kind === 'osmo';
+  return `
+    <div class="grab"></div>
+    <h2>Edit ${esc(valueEdit.label)}</h2>
+    <div class="form">
+      <div class="field"><label>Value</label><input id="ve_val" value="${esc(valueEdit.value)}"></div>
+      ${hasNote ? `<div class="field"><label>Note</label><input id="ve_note" value="${esc(valueEdit.note)}" placeholder="e.g. not drawn today"></div>` : ''}
+    </div>
+    <div class="formbtns">
+      <button class="btn ghost" onclick="closeValueEdit()">Cancel</button>
+      <button class="btn primary" onclick="saveValueEdit()">Save</button>
+    </div>`;
+}
+async function saveValueEdit() {
+  const p = state.byId[state.currentId]; if (!p || !valueEdit) return;
+  const { kind, key, label } = valueEdit;
+  const val = $('ve_val').value.trim();
+  if (!val) { toast('Enter a value'); return; }
+  if (kind === 'na' && isNaN(+val)) { toast('Sodium must be a number'); return; }
+  const note = $('ve_note') ? $('ve_note').value.trim() : undefined;
+
+  let affectsSnapshot = false;
+  if (kind === 'na') { applyChange(p, { field: 'na', new: val, date: todayMMDD() }); affectsSnapshot = true; }
+  else if (kind === 'vital') { applyChange(p, { field: key, new: val, date: todayMMDD() }); affectsSnapshot = SNAPSHOT_VITALS.has(key); }
+  else if (kind === 'k' || kind === 'osmo') applyChange(p, { field: kind, new: val, note });
+  else if (kind === 'score') {
+    const sc = p.scores.find((s) => s.l === key);
+    // Direction ('a' arrow) is meaningful only when we know which way is worse
+    // per-score (see neuroStatus) — for an arbitrary custom score we don't, so
+    // just update the value and drop the arrow rather than guess a direction.
+    if (sc) { sc.v = val; sc.a = ''; }
+  }
+  p.triage = computeTriage(p);
+  if (affectsSnapshot) upsertSnapshot(p, todayMMDD());
+  await store.savePatient(p);
+  closeValueEdit();
+  openCard(p.id);   // full re-render: labs/vitals/scores/triage dot/neuro refresh
+  renderToday();    // census triage dot may have changed
+  toast(label + ' updated', '✓');
+}
+
+// ---------------------------- medications ----------------------------
+// Add / edit / delete a medication. Meds don't feed triage or the snapshot
+// timeline, so this only mutates p.meds directly — no diff.js involvement.
+let medDraft = null; // { index: number|null, n, d, day, w }
+
+function openMedForm(index) {
+  const p = state.byId[state.currentId]; if (!p) return;
+  const existing = index != null ? p.meds[index] : null;
+  medDraft = { index, n: existing ? existing.n : '', d: existing ? existing.d : '', day: existing ? existing.day : '', w: existing ? !!existing.w : false };
+  $('medsheet').innerHTML = medFormHtml();
+  $('medsheet').classList.add('show');
+  $('medScrim').classList.add('show');
+}
+function closeMedForm() {
+  $('medsheet').classList.remove('show');
+  $('medScrim').classList.remove('show');
+  medDraft = null;
+}
+function medFormHtml() {
+  const isEdit = medDraft.index != null;
+  return `
+    <div class="grab"></div>
+    <h2>${isEdit ? 'Edit medication' : 'Add medication'}</h2>
+    <div class="form">
+      <div class="field"><label>Name</label><input id="med_n" value="${esc(medDraft.n)}" placeholder="e.g. Levetiracetam"></div>
+      <div class="field"><label>Dose / detail</label><input id="med_d" value="${esc(medDraft.d)}" placeholder="e.g. 500mg BID"></div>
+      <div class="field"><label>Day tag</label><input id="med_day" value="${esc(medDraft.day)}" placeholder="e.g. D5"></div>
+      <div class="field"><label>Flag as caution</label><div class="szchips">
+        ${chip('Yes', medDraft.w === true, 'medSetWarn(this,true)')}
+        ${chip('No', medDraft.w === false, 'medSetWarn(this,false)')}
+      </div></div>
+    </div>
+    <div class="formbtns">
+      ${isEdit ? `<button class="btn ghost danger" onclick="deleteMed()">Delete</button>` : ''}
+      <button class="btn ghost" onclick="closeMedForm()">Cancel</button>
+      <button class="btn primary" onclick="saveMed()">Save</button>
+    </div>`;
+}
+function medSetWarn(el, v) { medDraft.w = v; szGroupSelect(el); }
+async function saveMed() {
+  const p = state.byId[state.currentId]; if (!p || !medDraft) return;
+  const n = $('med_n').value.trim();
+  if (!n) { toast('Medication name is required'); return; }
+  const entry = { n, d: $('med_d').value.trim(), day: $('med_day').value.trim(), w: medDraft.w === true };
+  if (medDraft.index != null) p.meds[medDraft.index] = entry;
+  else p.meds = [...(p.meds || []), entry];
+  await store.savePatient(p);
+  const wasEdit = medDraft.index != null;
+  closeMedForm();
+  openCard(p.id);
+  toast(wasEdit ? 'Medication updated' : 'Medication added', '✓');
+}
+function deleteMed() {
+  const p = state.byId[state.currentId]; if (!p || !medDraft || medDraft.index == null) return;
+  p.meds = p.meds.filter((_, i) => i !== medDraft.index);
+  store.savePatient(p).then(() => { closeMedForm(); openCard(p.id); toast('Medication removed'); });
+}
+
 // ============================ Intake ============================
 function setSrc(s) {
   ['text', 'voice', 'photo'].forEach((x) => $('src_' + x).classList.toggle('on', x === s));
@@ -1098,7 +1249,7 @@ function openAdd() {
   $('addSheetTitle').textContent = 'Add patient';
   $('btnDeletePatient').style.display = 'none';
   
-  ['f_name', 'f_age', 'f_day', 'f_dx', 'f_room'].forEach((i) => ($(i).value = ''));
+  ['f_name', 'f_age', 'f_day', 'f_dx', 'f_detail', 'f_room'].forEach((i) => ($(i).value = ''));
   $('f_sex').value = 'M';
   
   fillHospitalSelect(); 
@@ -1120,6 +1271,7 @@ function openEdit() {
   $('f_sex').value = p.sex || 'M';
   $('f_day').value = p.day || '';
   $('f_dx').value = p.dx || '';
+  $('f_detail').value = p.detail || '';
   $('f_room').value = p.room || '';
 
   fillHospitalSelect();
@@ -1145,12 +1297,13 @@ async function savePatient() {
     p.sex = g('f_sex');
     p.day = g('f_day') || '1';
     p.dx = g('f_dx');
+    p.detail = g('f_detail');
     p.hospital = g('f_hosp');
     p.room = g('f_room');
   } else {
     // Add mode: create a brand new record
     p = newPatient({
-      name, age: g('f_age'), sex: g('f_sex'), dx: g('f_dx'), day: g('f_day') || '1',
+      name, age: g('f_age'), sex: g('f_sex'), dx: g('f_dx'), day: g('f_day') || '1', detail: g('f_detail'),
       hospital: g('f_hosp'), room: g('f_room'), triage: 'g',
       scores: [{ l: 'GCS', v: '15', a: '' }],
       ask: [{ q: 'Bowel movement', s: '', t: ['Yes', 'No'], on: 0, k: 'pos' }, { q: 'Sleep', s: '', t: ['Good', 'Poor'], on: 0, k: 'pos' }],
@@ -1465,7 +1618,9 @@ function toast(m, ok) { const t = $('toast'); t.innerHTML = (ok ? `<span class="
 // ---- expose handlers for inline onclick in index.html ----
 Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, closeTimeline, pick, neuroStep, setSrc, runDeid, runParse, toggleChange, commitReview, openAdd, closeAdd, savePatient, openEdit, doDeletePatient,resetDemo, toast, motorPick, motorSet, motorSetAll5, motorRecord, closeMpick, openSeizureForm, closeSeizureForm, saveSeizure, szPickType, szPickTrigger, szToggleFeature, szSetWitnessed, szSetResponded, openStrokeForm, closeStrokeForm, saveStrokeClock, scPickType, deactivateStrokeClock, handleOcrFile, retakeOcr, openHospitals, closeHospitals, hospAdd, hospRemove, hospMove,
   openBackup, closeBackup, pickBackupFile, doBackupExport, handleBackupFile,
-  doRestorePreview, doRestoreApply, doUndoRestore, cancelRestore });
+  doRestorePreview, doRestoreApply, doUndoRestore, cancelRestore,
+  openValueEdit, closeValueEdit, saveValueEdit,
+  openMedForm, closeMedForm, medSetWarn, saveMed, deleteMed });
 
 // ---- register the PWA service worker (added by vite-plugin-pwa on build) ----
 if ('serviceWorker' in navigator) {

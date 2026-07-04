@@ -136,7 +136,13 @@ export function applyChange(p, c) {
   if (c.field === 'na') {
     const nv = +c.new;
     p.na = [...p.na, nv].slice(-6);
-    p.naLabel = p.naLabel.replace(/→.*/, '→ ' + (c.date || 'today'));
+    // Build/extend the trend-axis label. A brand-new patient starts with an
+    // empty naLabel (no history yet); the 1st reading anchors a single date,
+    // the 2nd turns that into a range, and every reading after just moves the
+    // range's end date — never re-derived from a guessed prior date.
+    if (/→/.test(p.naLabel)) p.naLabel = p.naLabel.replace(/→.*/, '→ ' + (c.date || 'today'));
+    else if (p.naLabel) p.naLabel = p.naLabel + ' → ' + (c.date || 'today');
+    else p.naLabel = (c.date || 'today');
     const sc = p.scores.find((s) => s.l === 'NA');
     if (sc) {
       const prevV = +sc.v;
@@ -148,6 +154,10 @@ export function applyChange(p, c) {
     const key = VITAL_KEY[c.field];
     const v = p.vitals.find((x) => x[0] === key);
     if (v) v[1] = c.new; else p.vitals.push([key, c.new]);
+  } else if (c.field === 'k') {
+    p.k = { v: c.new, s: c.note != null ? c.note : (p.k ? p.k.s : '') };
+  } else if (c.field === 'osmo') {
+    p.osmo = { v: c.new, s: c.note != null ? c.note : (p.osmo ? p.osmo.s : '') };
   } else if (c.field === 'bm') {
     const a = p.ask.find((x) => x.q.toLowerCase().startsWith('bowel'));
     if (a) { const i = a.t.indexOf(c.new); if (i >= 0) a.on = i; }
@@ -157,6 +167,22 @@ export function applyChange(p, c) {
   } else if (c.field === 'ready') {
     p.ready = true;
   }
+}
+
+/**
+ * Push today's snapshot from the patient's current live values — OR, if the
+ * most recent snapshot is already dated today, overwrite it in place. This
+ * keeps the admission timeline at one row per day even when a day sees
+ * several edits (a nightly intake commit, then a bedside correction, etc.);
+ * without it, repeated same-day writes would silently duplicate timeline rows.
+ */
+export function upsertSnapshot(p, date) {
+  p.snapshots = p.snapshots || [];
+  const last = p.snapshots[p.snapshots.length - 1];
+  const fresh = snapshotOf(p, date);
+  if (last && last.date === date) Object.assign(last, fresh);
+  else p.snapshots.push(fresh);
+  return p;
 }
 
 /**
@@ -180,7 +206,6 @@ export function commitPatient(p, changes, date = 'today') {
     k: naCh ? 'Na ' + naCh.new : applied[0].label + ' ' + applied[0].new, tail: '',
   };
   p.newCount = applied.length;
-  p.snapshots = p.snapshots || [];
-  p.snapshots.push(snapshotOf(p, date));
+  upsertSnapshot(p, date);
   return p;
 }

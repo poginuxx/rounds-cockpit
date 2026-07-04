@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeTriage, diffSnapshots, commitPatient, snapshotOf, buildTimeline, neuroStatus } from './diff.js';
+import { computeTriage, diffSnapshots, commitPatient, applyChange, upsertSnapshot, snapshotOf, buildTimeline, neuroStatus } from './diff.js';
 import { newPatient } from './schema.js';
 
 describe('computeTriage', () => {
@@ -56,6 +56,64 @@ describe('commitPatient', () => {
     const before = JSON.stringify(p);
     commitPatient(p, [{ field: 'na', new: 120, apply: false }]);
     expect(JSON.stringify(p)).toBe(before);
+  });
+});
+
+describe('applyChange — na label building (bedside direct edits, no prior range)', () => {
+  it('anchors a single date on the first-ever reading', () => {
+    const p = newPatient({ na: [], naLabel: '', scores: [] });
+    applyChange(p, { field: 'na', new: 140, date: '07/01' });
+    expect(p.naLabel).toBe('07/01');
+  });
+  it('turns the anchor into a range on the second reading', () => {
+    const p = newPatient({ na: [140], naLabel: '07/01', scores: [] });
+    applyChange(p, { field: 'na', new: 138, date: '07/02' });
+    expect(p.naLabel).toBe('07/01 → 07/02');
+  });
+  it('moves only the end date on subsequent readings', () => {
+    const p = newPatient({ na: [140, 138], naLabel: '07/01 → 07/02', scores: [] });
+    applyChange(p, { field: 'na', new: 136, date: '07/03' });
+    expect(p.naLabel).toBe('07/01 → 07/03');
+  });
+});
+
+describe('applyChange — potassium and osmolality', () => {
+  it('sets K value and keeps the existing note when none is given', () => {
+    const p = newPatient({ k: { v: '4.0', s: 'baseline' } });
+    applyChange(p, { field: 'k', new: '3.2' });
+    expect(p.k).toEqual({ v: '3.2', s: 'baseline' });
+  });
+  it('overwrites the K note when one is given', () => {
+    const p = newPatient({ k: { v: '4.0', s: 'baseline' } });
+    applyChange(p, { field: 'k', new: '3.2', note: 'hemolyzed, repeat' });
+    expect(p.k).toEqual({ v: '3.2', s: 'hemolyzed, repeat' });
+  });
+  it('sets serum osmolality the same way', () => {
+    const p = newPatient({ osmo: { v: '—', s: 'not drawn today' } });
+    applyChange(p, { field: 'osmo', new: '268', note: 'low · ?SIADH' });
+    expect(p.osmo).toEqual({ v: '268', s: 'low · ?SIADH' });
+  });
+});
+
+describe('upsertSnapshot', () => {
+  it('appends a new row when no snapshot exists for that date', () => {
+    const p = newPatient({ na: [136], snapshots: [{ date: '06/16', na: 134 }] });
+    upsertSnapshot(p, '06/17');
+    expect(p.snapshots).toHaveLength(2);
+    expect(p.snapshots[1]).toMatchObject({ date: '06/17', na: 136 });
+  });
+  it('overwrites the last row in place when it is already dated today', () => {
+    const p = newPatient({ na: [136], snapshots: [{ date: '06/17', na: 999 }] });
+    upsertSnapshot(p, '06/17');
+    expect(p.snapshots).toHaveLength(1);
+    expect(p.snapshots[0]).toMatchObject({ date: '06/17', na: 136 });
+  });
+  it('keeps commitPatient from duplicating a same-day row on a second commit', () => {
+    const p = newPatient({ na: [136], naLabel: '06/16', scores: [{ l: 'NA', v: '136', a: '' }], snapshots: [] });
+    commitPatient(p, [{ field: 'na', new: 134, apply: true, label: 'Sodium' }], '06/17');
+    commitPatient(p, [{ field: 'na', new: 130, apply: true, label: 'Sodium' }], '06/17');
+    expect(p.snapshots).toHaveLength(1);
+    expect(p.snapshots[0]).toMatchObject({ date: '06/17', na: 130 });
   });
 });
 
