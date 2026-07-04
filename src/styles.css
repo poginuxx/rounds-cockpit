@@ -339,7 +339,7 @@ body{font-family:'IBM Plex Sans',system-ui,sans-serif;
 
 .toast{position:absolute;left:50%;bottom:24px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:#fff;
   font-size:13px;font-weight:500;padding:11px 18px;border-radius:13px;z-index:40;opacity:0;transition:.25s;
-  display:flex;align-items:center;gap:8px;max-width:320px}
+  display:flex;align-items:center;gap:8px;max-width:320px;pointer-events:none}
 .toast.show{opacity:1;transform:translateX(-50%)}.toast .ok{color:#5fe0b9;font-weight:700}
 
 /* tab bar */
