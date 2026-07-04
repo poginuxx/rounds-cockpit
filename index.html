@@ -43,7 +43,6 @@
           <div class="digest"><div class="ic">!</div><div class="t" id="digest"></div></div>
           <div class="routebar" id="routebar"></div>
         </div>
-        <div class="demo-banner"><span>⚠</span><div><b>Foundation demo.</b> Seeded sample patients — don't enter real ones until the full app is built.</div></div>
         <div class="backup-nudge" id="backupNudge" onclick="openBackup()" style="display:none"></div>
         <div id="list"></div>
         <div style="height:20px"></div>
@@ -102,7 +101,7 @@
         </div>
         <div class="zone"><div class="zone-h ask"><span class="tag">ASK</span><span class="sub">bedside questions · tap to answer</span></div>
           <div class="asklist" id="rcAsk"></div></div>
-        <div class="zone"><div class="zone-h look"><span class="tag">LOOK</span><span class="sub">trend-first · normal band shaded</span></div>
+        <div class="zone"><div class="zone-h look"><span class="tag">LOOK</span><span class="sub">trend-first · normal band shaded</span><button class="zone-link" onclick="openLabsManager()">Manage labs</button></div>
           <div class="labgrid" id="rcLabs"></div>
           <div class="vitals" id="rcVitals" style="margin-top:9px"></div>
           <div class="meds" id="rcMeds" style="margin-top:9px"></div>
@@ -176,10 +175,16 @@
     <div class="scrim" id="scScrim" onclick="closeStrokeForm()"></div>
     <div class="addsheet" id="scsheet"></div>
 
-    <!-- generic value-edit sheet: bedside tap-to-edit for Na/K/osmo/vitals/scores
-         (filled by JS) — the fast single-value path, separate from nightly Intake -->
+    <!-- generic value-edit sheet: bedside tap-to-edit for Na/K/osmo/vitals/scores,
+         and logging a dated reading for a custom lab (filled by JS) — the fast
+         single-value path, separate from nightly Intake -->
     <div class="scrim" id="editScrim" onclick="closeValueEdit()"></div>
     <div class="addsheet" id="editsheet"></div>
+
+    <!-- manage-labs sheet: per-patient trend tracking — toggle Sodium, add/remove
+         arbitrary custom labs like Creatinine (filled by JS) -->
+    <div class="scrim" id="labsScrim" onclick="closeLabsManager()"></div>
+    <div class="addsheet" id="labssheet"></div>
 
     <!-- medication add/edit/delete sheet (filled by JS) -->
     <div class="scrim" id="medScrim" onclick="closeMedForm()"></div>

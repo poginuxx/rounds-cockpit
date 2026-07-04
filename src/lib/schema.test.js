@@ -9,6 +9,32 @@ describe('newPatient', () => {
   it('starts with an empty seizures array', () => {
     expect(newPatient().seizures).toEqual([]);
   });
+  it('does not track a sodium trend by default — opt-in per patient', () => {
+    expect(newPatient().trackNa).toBe(false);
+  });
+  it('starts with no custom labs', () => {
+    expect(newPatient().customLabs).toEqual([]);
+  });
+});
+
+describe('seedPatients lab trends', () => {
+  const seeds = seedPatients();
+  const byId = Object.fromEntries(seeds.map((p) => [p.id, p]));
+
+  it('only tracks sodium by default for the two patients where Na is the actual concern', () => {
+    expect(byId.p_ramon.trackNa).toBe(true);
+    expect(byId.p_aurora.trackNa).toBe(true);
+    expect(byId.p_lourdes.trackNa).toBe(false);
+    expect(byId.p_efren.trackNa).toBe(false);
+    expect(byId.p_carmela.trackNa).toBe(false);
+  });
+
+  it('gives the illustrative creatinine trend a normal band and a multi-point series', () => {
+    const cr = byId.p_ramon.customLabs.find((l) => l.label === 'Creatinine');
+    expect(cr).toBeTruthy();
+    expect(cr.band).toEqual([0.6, 1.2]);
+    expect(cr.series.length).toBeGreaterThanOrEqual(2);
+  });
 });
 
 describe('seedPatients seizure log', () => {

@@ -191,18 +191,24 @@ function renderToday() {
   list.innerHTML = html;
 }
 
-// sparkline (presentation only)
-function sparkline(series) {
+// sparkline (presentation only) — generalized over an arbitrary normal band so
+// it works for any trended lab, not just sodium. `band` is [lo, hi] or null (no
+// shaded normal range / no in-band-vs-out colouring, just a plain trend line).
+function sparkline(series, band = [135, 145]) {
   const w = 150, h = 34;
-  const min = Math.min(...series, 128), max = Math.max(...series, 142), rng = (max - min) || 1;
+  const min = band ? Math.min(...series, band[0]) : Math.min(...series);
+  const max = band ? Math.max(...series, band[1]) : Math.max(...series);
+  const rng = (max - min) || 1;
   const x = (i) => 6 + i * ((w - 12) / (series.length - 1));
   const y = (v) => h - 4 - ((v - min) / rng) * (h - 10);
   const pts = series.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-  const bandTop = y(Math.min(145, max)), bandBot = y(Math.max(135, min));
   const last = series[series.length - 1];
-  const col = last < 135 || last > 145 ? '#CF463C' : '#0E7C6B';
+  const col = band && (last < band[0] || last > band[1]) ? '#CF463C' : '#0E7C6B';
+  const bandRect = band
+    ? `<rect x="0" y="${y(Math.min(band[1], max)).toFixed(1)}" width="${w}" height="${(y(Math.max(band[0], min)) - y(Math.min(band[1], max))).toFixed(1)}" fill="#E6F2EA"/>`
+    : '';
   return `<svg width="100%" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="display:block">
-    <rect x="0" y="${bandTop.toFixed(1)}" width="${w}" height="${(bandBot - bandTop).toFixed(1)}" fill="#E6F2EA"/>
+    ${bandRect}
     <polyline points="${pts}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
     ${series.map((v, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="${i === series.length - 1 ? 2.6 : 1.6}" fill="${i === series.length - 1 ? col : '#9AA4AD'}"/>`).join('')}</svg>`;
 }
@@ -220,15 +226,15 @@ function openCard(id) {
       <div class="toggle">${a.t.map((opt, oi) => `<button class="${oi === a.on ? 'on ' + a.k : ''}" onclick="pick(${ai},${oi})">${esc(opt)}</button>`).join('')}</div></div>`).join('');
   const hasNa = (p.na || []).length > 0;
   const naLast = hasNa ? p.na[p.na.length - 1] : null, naCls = naLast == null ? '' : naLast < 135 ? 'bad' : (naLast < 137 ? 'warn' : '');
-  // Always render the Sodium cell (even at zero readings) and make it tappable —
-  // previously a freshly Add-Patient-created record with no Na yet had no way to
-  // ever enter the FIRST reading except by routing free text through Intake.
-  const naCell = `
+  // The Sodium trend cell is OPT-IN per patient (p.trackNa, via "Manage labs") —
+  // it does NOT render at all for a patient the physician hasn't chosen to
+  // monitor for Na, rather than showing (even empty) for every patient by default.
+  const naCell = p.trackNa ? `
     <div class="labcell wide" onclick="openValueEdit('na','na','Sodium (Na)','${naLast == null ? '' : naLast}')"><div class="lh"><span class="nm">Sodium · trend</span><span class="val ${naCls}">${naLast ?? '—'}<small> mmol/L</small></span></div>
       ${hasNa && p.na.length >= 2 ? `<div class="spark">${sparkline(p.na)}</div>
       <div class="sparkrow"><span class="seq">${esc(p.naLabel)}</span><span class="seq">band 135–145</span></div>`
         : hasNa ? `<div class="seq mono" style="font-size:11px;color:var(--faint);margin-top:6px">one reading so far — trend builds as you commit updates</div>`
-        : `<div class="seq mono" style="font-size:11px;color:var(--faint);margin-top:6px">tap to add the first reading</div>`}</div>`;
+        : `<div class="seq mono" style="font-size:11px;color:var(--faint);margin-top:6px">tap to add the first reading</div>`}</div>` : '';
   // Potassium's "bad" flag is derived from the value against its own printed band
   // (3.5–5.1) — the prior code checked p.kbad, a field nothing ever set, so a
   // critically abnormal K never actually got flagged red.
@@ -236,7 +242,8 @@ function openCard(id) {
   const kCls = !isNaN(kNum) && (kNum < 3.5 || kNum > 5.1) ? 'bad' : '';
   $('rcLabs').innerHTML = `${naCell}
     <div class="labcell" onclick="openValueEdit('k','k','Potassium (K)','${jsq(p.k.v)}','${jsq(p.k.s)}')"><div class="lh"><span class="nm">Potassium</span></div><div class="val ${kCls}">${esc(p.k.v)}<small> mmol/L</small></div><div class="seq mono" style="font-size:10px;color:var(--faint);margin-top:4px">${esc(p.k.s)}</div></div>
-    <div class="labcell" onclick="openValueEdit('osmo','osmo','Serum osmolality','${jsq(p.osmo.v)}','${jsq(p.osmo.s)}')"><div class="lh"><span class="nm">Serum osmo</span></div><div class="val ${p.osmo.v !== '—' && +p.osmo.v < 275 ? 'warn' : ''}">${esc(p.osmo.v)}</div><div class="seq mono" style="font-size:10px;color:var(--faint);margin-top:4px">${esc(p.osmo.s)}</div></div>`;
+    <div class="labcell" onclick="openValueEdit('osmo','osmo','Serum osmolality','${jsq(p.osmo.v)}','${jsq(p.osmo.s)}')"><div class="lh"><span class="nm">Serum osmo</span></div><div class="val ${p.osmo.v !== '—' && +p.osmo.v < 275 ? 'warn' : ''}">${esc(p.osmo.v)}</div><div class="seq mono" style="font-size:10px;color:var(--faint);margin-top:4px">${esc(p.osmo.s)}</div></div>
+    ${customLabCellsHtml(p)}`;
   $('rcVitals').innerHTML = p.vitals.map((v) => {
     const cfg = VITAL_EDIT.find((x) => x.vkey === v[0]);
     const click = cfg ? `onclick="openValueEdit('vital','${cfg.field}','${jsq(cfg.label)}','${jsq(v[1])}')"` : '';
@@ -957,6 +964,7 @@ function closeValueEdit() {
   $('editsheet').classList.remove('show');
   $('editScrim').classList.remove('show');
   valueEdit = null;
+  labReadingIndex = null;
 }
 function valueEditFormHtml() {
   const hasNote = valueEdit.kind === 'k' || valueEdit.kind === 'osmo';
@@ -998,6 +1006,136 @@ async function saveValueEdit() {
   openCard(p.id);   // full re-render: labs/vitals/scores/triage dot/neuro refresh
   renderToday();    // census triage dot may have changed
   toast(label + ' updated', '✓');
+}
+
+// ---------------------------- custom lab trends ----------------------------
+// Arbitrary physician-added trend labs (e.g. Creatinine) tracked per patient —
+// see "Manage labs". Purely informational: unlike Na, these never feed
+// computeTriage (no clinical threshold is assumed for an arbitrary lab name).
+const todayISODate = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+const fmtLabDate = (iso) => { const d = new Date(iso + 'T00:00:00'); return isNaN(d.getTime()) ? iso : `${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`; };
+
+function customLabCellsHtml(p) {
+  return (p.customLabs || []).map((lab, i) => {
+    const series = (lab.series || []).map((r) => r.value);
+    const last = series.length ? series[series.length - 1] : null;
+    const cls = (lab.band && last != null && (last < lab.band[0] || last > lab.band[1])) ? 'bad' : '';
+    const unitTag = lab.unit ? `<small> ${esc(lab.unit)}</small>` : '';
+    const bandTag = lab.band ? `band ${lab.band[0]}–${lab.band[1]}` : '';
+    let body;
+    if (series.length >= 2) {
+      const span = `${esc(fmtLabDate(lab.series[0].date))} → ${esc(fmtLabDate(lab.series[lab.series.length - 1].date))}`;
+      body = `<div class="spark">${sparkline(series, lab.band)}</div><div class="sparkrow"><span class="seq">${span}</span><span class="seq">${esc(bandTag)}</span></div>`;
+    } else if (series.length === 1) {
+      body = `<div class="seq mono" style="font-size:11px;color:var(--faint);margin-top:6px">one reading so far — trend builds as you log more</div>`;
+    } else {
+      body = `<div class="seq mono" style="font-size:11px;color:var(--faint);margin-top:6px">tap to add the first reading</div>`;
+    }
+    return `<div class="labcell wide" onclick="openLabReading(${i})"><div class="lh"><span class="nm">${esc(lab.label)} · trend</span><span class="val ${cls}">${last ?? '—'}${unitTag}</span></div>${body}</div>`;
+  }).join('');
+}
+
+let labReadingIndex = null; // index into p.customLabs currently being logged (shares #editsheet)
+
+function openLabReading(index) {
+  const p = state.byId[state.currentId]; if (!p) return;
+  const lab = p.customLabs[index]; if (!lab) return;
+  labReadingIndex = index;
+  $('editsheet').innerHTML = `
+    <div class="grab"></div>
+    <h2>Log ${esc(lab.label)}</h2>
+    <div class="form">
+      <div class="field"><label>Value${lab.unit ? ' (' + esc(lab.unit) + ')' : ''}</label><input id="lab_val" inputmode="decimal"></div>
+      <div class="field"><label>Date</label><input id="lab_date" type="date" value="${todayISODate()}"></div>
+    </div>
+    <div class="formbtns">
+      <button class="btn ghost" onclick="closeValueEdit()">Cancel</button>
+      <button class="btn primary" onclick="saveLabReading()">Save</button>
+    </div>`;
+  $('editsheet').classList.add('show');
+  $('editScrim').classList.add('show');
+}
+async function saveLabReading() {
+  const p = state.byId[state.currentId]; if (!p || labReadingIndex == null) return;
+  const lab = p.customLabs[labReadingIndex]; if (!lab) return;
+  const raw = $('lab_val').value.trim();
+  if (raw === '' || isNaN(+raw)) { toast('Enter a numeric value'); return; }
+  const date = $('lab_date').value || todayISODate();
+  lab.series = [...(lab.series || []), { date, value: +raw }];
+  await store.savePatient(p);
+  closeValueEdit();
+  openCard(p.id);
+  toast(lab.label + ' reading logged', '✓');
+}
+
+// ---------------------------- manage labs (per-patient trend picker) ----------------------------
+function openLabsManager() {
+  const p = state.byId[state.currentId]; if (!p) return;
+  renderLabsManager();
+  $('labsScrim').classList.add('show');
+  $('labssheet').classList.add('show');
+}
+function closeLabsManager() {
+  $('labsScrim').classList.remove('show');
+  $('labssheet').classList.remove('show');
+}
+function renderLabsManager() {
+  const p = state.byId[state.currentId]; if (!p) return;
+  const customRows = (p.customLabs || []).map((lab, i) => `
+    <div class="hosp-row">
+      <div class="hosp-id"><div class="hosp-nm">${esc(lab.label)}</div><div class="hosp-ab">${lab.unit ? esc(lab.unit) + ' · ' : ''}${lab.band ? `band ${lab.band[0]}–${lab.band[1]}` : 'no normal band set'}</div></div>
+      <div class="hosp-ctl"><button class="iconbtn danger" title="Stop tracking" onclick="removeCustomLab(${i})">✕</button></div>
+    </div>`).join('');
+  $('labssheet').innerHTML = `
+    <div class="grab"></div>
+    <h2>Manage labs</h2>
+    <div class="lead">Choose which trends show on this patient's Round Card — Sodium and any lab you add are per-patient, so a lab that isn't relevant here just stays off.</div>
+    <div class="form">
+      <div class="hosp-row">
+        <div class="hosp-id"><div class="hosp-nm">Sodium (Na)</div><div class="hosp-ab">mmol/L · band 135–145</div></div>
+        <div class="hosp-ctl"><button class="mtool ${p.trackNa ? '' : 'primary'}" onclick="toggleTrackNa()">${p.trackNa ? 'Untrack' : 'Track'}</button></div>
+      </div>
+      ${customRows}
+      <div class="hosp-add">
+        <div class="frow">
+          <div class="field" style="flex:2"><label>Lab name</label><input id="lab_name" placeholder="e.g. Creatinine"></div>
+          <div class="field"><label>Unit</label><input id="lab_unit" placeholder="mg/dL"></div>
+        </div>
+        <div class="frow">
+          <div class="field"><label>Normal low <small style="font-weight:400;color:var(--faint)">(optional)</small></label><input id="lab_lo" inputmode="decimal" placeholder="0.6"></div>
+          <div class="field"><label>Normal high <small style="font-weight:400;color:var(--faint)">(optional)</small></label><input id="lab_hi" inputmode="decimal" placeholder="1.2"></div>
+        </div>
+        <button class="btn primary" onclick="addCustomLab()">Add lab</button>
+      </div>
+    </div>
+    <div class="formbtns"><button class="btn ghost" onclick="closeLabsManager()">Done</button></div>`;
+}
+async function toggleTrackNa() {
+  const p = state.byId[state.currentId]; if (!p) return;
+  p.trackNa = !p.trackNa;
+  await store.savePatient(p);
+  renderLabsManager();
+  openCard(p.id);
+}
+async function addCustomLab() {
+  const p = state.byId[state.currentId]; if (!p) return;
+  const name = $('lab_name').value.trim();
+  if (!name) { toast('Lab name is required'); return; }
+  const unit = $('lab_unit').value.trim();
+  const lo = $('lab_lo').value.trim(), hi = $('lab_hi').value.trim();
+  const band = (lo !== '' && hi !== '' && !isNaN(+lo) && !isNaN(+hi)) ? [+lo, +hi] : null;
+  p.customLabs = [...(p.customLabs || []), { id: 'lab_' + Date.now(), label: name, unit, band, series: [] }];
+  await store.savePatient(p);
+  renderLabsManager();
+  openCard(p.id);
+  toast(name + ' added — log its first reading from the Round Card', '✓');
+}
+async function removeCustomLab(i) {
+  const p = state.byId[state.currentId]; if (!p) return;
+  p.customLabs = (p.customLabs || []).filter((_, idx) => idx !== i);
+  await store.savePatient(p);
+  renderLabsManager();
+  openCard(p.id);
 }
 
 // ---------------------------- medications ----------------------------
@@ -1620,7 +1758,9 @@ Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, close
   openBackup, closeBackup, pickBackupFile, doBackupExport, handleBackupFile,
   doRestorePreview, doRestoreApply, doUndoRestore, cancelRestore,
   openValueEdit, closeValueEdit, saveValueEdit,
-  openMedForm, closeMedForm, medSetWarn, saveMed, deleteMed });
+  openMedForm, closeMedForm, medSetWarn, saveMed, deleteMed,
+  openLabsManager, closeLabsManager, toggleTrackNa, addCustomLab, removeCustomLab,
+  openLabReading, saveLabReading });
 
 // ---- register the PWA service worker (added by vite-plugin-pwa on build) ----
 if ('serviceWorker' in navigator) {

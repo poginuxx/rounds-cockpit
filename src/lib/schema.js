@@ -22,6 +22,14 @@ export function newPatient(fields = {}) {
     scores: [],            // [{ l, v, a, d }]  a: '' | 'dn' | 'up'
     ask: [],               // [{ q, s, t:[...], on, k }]  k: 'pos' | 'neg' | 'neu'
     na: [], naLabel: '',   // sodium trend series + axis label
+    trackNa: false,        // whether the Sodium trend cell shows on the Round Card —
+                            //   OPT-IN per patient (physician chooses via "Manage labs"),
+                            //   not shown for every patient by default. The underlying
+                            //   na[] history/triage math is unaffected either way.
+    customLabs: [],         // [{ id, label, unit, band:[lo,hi]|null, series:[{date,value}] }]
+                            //   arbitrary physician-added trend labs (e.g. Creatinine) for
+                            //   THIS patient only. Informational/monitoring only — these
+                            //   never feed computeTriage (see CLAUDE.md invariant #5).
     k: { v: '—', s: '3.5–5.1' },
     osmo: { v: '—', s: '' },
     vitals: [],            // [[label, value], ...] labels: BP HR RR TEMP SPO₂
@@ -120,12 +128,18 @@ export function seedPatients() {
            {q:'Bowel movement',s:'last: yesterday',t:['Yes','No'],on:0,k:'pos'},
            {q:'Sleep',s:'',t:['Good','Poor'],on:1,k:'neg'},
            {q:'New focal deficit',s:'screen for vasospasm',t:['No','Yes'],on:0,k:'pos'}],
-      na:[136,134,132,130,128], naLabel:'06/12 → 06/16', k:{v:'3.9',s:'3.5–5.1'}, osmo:{v:'268',s:'low · ?SIADH vs CSW'},
+      na:[136,134,132,130,128], naLabel:'06/12 → 06/16', trackNa:true, k:{v:'3.9',s:'3.5–5.1'}, osmo:{v:'268',s:'low · ?SIADH vs CSW'},
       vitals:[['BP','148/86'],['HR','78'],['RR','18'],['TEMP','37.2'],['SPO₂','98%']],
       meds:[{n:'Nimodipine',d:'60mg q4h',day:'D5·21',w:false},{n:'3% NaCl',d:'infusion',day:'started',w:true},
             {n:'Levetiracetam',d:'500mg BID',day:'D5',w:false},{n:'Paracetamol',d:'PRN',day:'PRN',w:false}],
       doMain:{t:'Repeat Na in 6h',s:'hyponatremia — confirm CSW vs SIADH'},
-      snapshots:[{date:'06/16',na:128}] },
+      snapshots:[{date:'06/16',na:128}],
+      // Illustrative custom trend: post-angiography creatinine watch, physician-added
+      // via "Manage labs" — a mild contrast-related rise now stabilizing. Demonstrates
+      // that any lab can be tracked per-patient, not just the ones built into the app.
+      customLabs:[{ id:'lab_ramon_cr', label:'Creatinine', unit:'mg/dL', band:[0.6,1.2], series:[
+        {date:'2026-06-12',value:0.9},{date:'2026-06-13',value:1.0},{date:'2026-06-14',value:1.1},
+        {date:'2026-06-15',value:1.3},{date:'2026-06-16',value:1.2} ] }] },
 
     { id:'p_aurora', name:'Aurora Mendoza', age:'67', sex:'F', dx:'L MCA infarct', day:'3', detail:'NIHSS 6',
       hospital:'Region 1 Medical Center', room:'412', triage:'a', newCount:2,
@@ -137,7 +151,7 @@ export function seedPatients() {
            {q:'Sleep',s:'',t:['Good','Poor'],on:1,k:'neg'},
            {q:'Swallowing',s:'dysphagia screen',t:['Safe','Watch'],on:1,k:'neu'},
            {q:'Arm strength',s:'R upper limb',t:['Improving','Same'],on:0,k:'pos'}],
-      na:[138,136,134,132,131], naLabel:'06/14 → 06/16', k:{v:'4.1',s:'3.5–5.1'}, osmo:{v:'—',s:'not drawn today'},
+      na:[138,136,134,132,131], naLabel:'06/14 → 06/16', trackNa:true, k:{v:'4.1',s:'3.5–5.1'}, osmo:{v:'—',s:'not drawn today'},
       vitals:[['BP','156/90'],['HR','72'],['RR','16'],['TEMP','36.8'],['SPO₂','99%']],
       meds:[{n:'Aspirin',d:'80mg OD',day:'D3',w:false},{n:'Atorvastatin',d:'40mg HS',day:'D3',w:false},{n:'Citicoline',d:'1g BID',day:'D3',w:false}],
       doMain:{t:'Order lactulose + senna',s:'no BM ×2 days · constipation'},
