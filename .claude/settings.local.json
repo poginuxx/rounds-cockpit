@@ -37,7 +37,9 @@
       "Bash(node -e \"console.log\\(new Date\\(\\).toLocaleDateString\\('en-PH',{weekday:'short',day:'numeric',month:'short'}\\).replace\\(/,/g,' ·'\\).toUpperCase\\(\\)\\)\")",
       "Skill(claude-api)",
       "Skill(claude-api:*)",
-      "Bash(gh pr *)"
+      "Bash(gh pr *)",
+      "Bash(git credential *)",
+      "Bash(awk -F= '$1==\"password\"{print $2}')"
     ]
   }
 }
