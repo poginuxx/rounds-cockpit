@@ -1671,18 +1671,20 @@ function renderBackup() {
     <h2>Backup &amp; restore</h2>
     <div class="lead">${lastTxt} A backup is a single <b>encrypted</b> file you keep yourself — it is never uploaded anywhere.</div>
 
-    <div class="bk-sect">
-      <div class="bk-sect-h">Create a backup</div>
-      <div class="bk-note">Protect it with a <b>strong recovery passphrase</b> — not your daily 6-digit passcode. The file is portable, so a short PIN could be cracked offline. Use 4+ words or 12+ characters. The passphrase is <b>never stored</b>; if you lose it the backup can't be opened.</div>
-      <div class="field"><label>Recovery passphrase</label>
-        <input id="bk_pass" type="password" placeholder="e.g. four random unrelated words" autocomplete="off"></div>
-      <button class="btn primary" onclick="doBackupExport()">Create encrypted backup</button>
-    </div>
+    <div class="form">
+      <div class="bk-sect" style="margin-top:0;padding-top:0;border-top:none">
+        <div class="bk-sect-h">Create a backup</div>
+        <div class="bk-note">Protect it with a <b>strong recovery passphrase</b> — not your daily 6-digit passcode. The file is portable, so a short PIN could be cracked offline. Use 4+ words or 12+ characters. The passphrase is <b>never stored</b>; if you lose it the backup can't be opened.</div>
+        <div class="field"><label>Recovery passphrase</label>
+          <input id="bk_pass" type="password" placeholder="e.g. four random unrelated words" autocomplete="off"></div>
+        <button class="btn primary" onclick="doBackupExport()">Create encrypted backup</button>
+      </div>
 
-    <div class="bk-sect">
-      <div class="bk-sect-h">Restore from a backup</div>
-      <div class="bk-note">Restore onto this phone or a brand-new install. You'll see what the file contains and confirm before anything changes.</div>
-      ${restoreInner}
+      <div class="bk-sect">
+        <div class="bk-sect-h">Restore from a backup</div>
+        <div class="bk-note">Restore onto this phone or a brand-new install. You'll see what the file contains and confirm before anything changes.</div>
+        ${restoreInner}
+      </div>
     </div>
 
     <div class="formbtns"><button class="btn ghost" onclick="closeBackup()">Close</button></div>`;
