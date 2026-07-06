@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { newPatient, seedPatients } from './schema.js';
+import { newPatient, seedPatients, ageFromDob } from './schema.js';
 import { summary } from './seizures.js';
 
 describe('newPatient', () => {
   it('starts with an empty snapshots array', () => {
     expect(newPatient().snapshots).toEqual([]);
+  });
+  it('starts with a blank birthdate — never a fabricated one', () => {
+    expect(newPatient().dob).toBe('');
   });
   it('starts with an empty seizures array', () => {
     expect(newPatient().seizures).toEqual([]);
@@ -14,6 +17,24 @@ describe('newPatient', () => {
   });
   it('starts with no custom labs', () => {
     expect(newPatient().customLabs).toEqual([]);
+  });
+});
+
+describe('ageFromDob', () => {
+  const now = new Date('2026-07-06T12:00:00');
+
+  it('counts completed years', () => {
+    expect(ageFromDob('1954-03-10', now)).toBe('72');
+  });
+  it('is one year less before the birthday than after it', () => {
+    expect(ageFromDob('1954-07-07', now)).toBe('71'); // birthday tomorrow
+    expect(ageFromDob('1954-07-06', now)).toBe('72'); // birthday today
+  });
+  it('returns blank for blank, invalid, future, or implausible dates — never a guess', () => {
+    expect(ageFromDob('', now)).toBe('');
+    expect(ageFromDob('not-a-date', now)).toBe('');
+    expect(ageFromDob('2027-01-01', now)).toBe(''); // future
+    expect(ageFromDob('1880-01-01', now)).toBe(''); // >130y
   });
 });
 

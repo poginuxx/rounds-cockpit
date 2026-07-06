@@ -13,7 +13,7 @@ import * as store from './lib/store.js';
 import { deidentify } from './lib/deid.js';
 import { parseUpdate } from './lib/parser.js';
 import { commitPatient, buildDigest, buildTimeline, neuroStatus, applyChange, computeTriage, upsertSnapshot } from './lib/diff.js';
-import { newPatient, seedPatients } from './lib/schema.js';
+import { newPatient, seedPatients, ageFromDob } from './lib/schema.js';
 import {
   SEED_HOSPITALS, addHospital, removeHospital, moveHospital, abbrFor,
   groupPatientsByHospital,
@@ -28,6 +28,7 @@ import {
 } from './lib/strokeclock.js';
 import { recognize } from './lib/ocr.js';
 import { createBackup, readBackup, passphraseStrength, BackupError } from './lib/backup.js';
+import { clinicExportText } from './lib/clinicExport.js';
 
 // ---- where your model API key would come from (kept null = offline parsing) ----
 // To enable the cloud parser, store the key in the encrypted vault and return it
@@ -1363,6 +1364,13 @@ function closeAdd() {
   state.editingId = null;
 }
 
+// Birthdate typed → age field fills itself (still editable — the physician's
+// manual age wins if they change it afterwards). Blank/invalid dates fill nothing.
+function dobToAge() {
+  const a = ageFromDob($('f_dob').value);
+  if (a) $('f_age').value = a;
+}
+
 // The Add-Patient dropdown lists hospitals by FULL NAME (where a wrong choice has
 // consequences), in route order, from the managed list.
 function fillHospitalSelect() {
@@ -1386,8 +1394,9 @@ function openAdd() {
   state.editingId = null;
   $('addSheetTitle').textContent = 'Add patient';
   $('btnDeletePatient').style.display = 'none';
+  $('btnClinicExport').style.display = 'none';
   
-  ['f_name', 'f_age', 'f_day', 'f_dx', 'f_detail', 'f_room'].forEach((i) => ($(i).value = ''));
+  ['f_name', 'f_dob', 'f_age', 'f_day', 'f_dx', 'f_detail', 'f_room'].forEach((i) => ($(i).value = ''));
   $('f_sex').value = 'M';
   
   fillHospitalSelect(); 
@@ -1403,8 +1412,10 @@ function openEdit() {
   state.editingId = p.id;
   $('addSheetTitle').textContent = 'Edit patient';
   $('btnDeletePatient').style.display = 'block';
+  $('btnClinicExport').style.display = 'block';
 
   $('f_name').value = p.name || '';
+  $('f_dob').value = p.dob || '';
   $('f_age').value = p.age || '';
   $('f_sex').value = p.sex || 'M';
   $('f_day').value = p.day || '';
@@ -1431,6 +1442,7 @@ async function savePatient() {
     // Edit mode: mutate the existing patient record
     p = state.byId[state.editingId];
     p.name = name;
+    p.dob = g('f_dob');
     p.age = g('f_age');
     p.sex = g('f_sex');
     p.day = g('f_day') || '1';
@@ -1441,7 +1453,7 @@ async function savePatient() {
   } else {
     // Add mode: create a brand new record
     p = newPatient({
-      name, age: g('f_age'), sex: g('f_sex'), dx: g('f_dx'), day: g('f_day') || '1', detail: g('f_detail'),
+      name, dob: g('f_dob'), age: g('f_age'), sex: g('f_sex'), dx: g('f_dx'), day: g('f_day') || '1', detail: g('f_detail'),
       hospital: g('f_hosp'), room: g('f_room'), triage: 'g',
       scores: [{ l: 'GCS', v: '15', a: '' }],
       ask: [{ q: 'Bowel movement', s: '', t: ['Yes', 'No'], on: 0, k: 'pos' }, { q: 'Sleep', s: '', t: ['Good', 'Poor'], on: 0, k: 'pos' }],
@@ -1473,6 +1485,53 @@ async function doDeletePatient() {
   await loadPatients();
   renderToday();
   toast('Patient deleted');
+}
+
+// ============================ Send to clinic ============================
+// Discharge handover: shows the patient as the JSON the Brain Clinic app's
+// "Import from JSON" box (New Patient page) understands, with Copy + Share.
+// PLAINTEXT leaves only via an explicit physician tap to the clipboard or the
+// native share sheet — the app itself never uploads, stores, or auto-sends it.
+function openClinicExport() {
+  const p = state.byId[state.editingId || state.currentId]; if (!p) return;
+  const text = clinicExportText(p);
+  $('clinicsheet').innerHTML = `
+    <div class="grab"></div>
+    <h2>Send to clinic</h2>
+    <div class="lead">Copy this and paste it into <b>Brain Clinic → Add New Patient → Import from JSON</b>. Date of birth, phone and address aren't stored here — fill those in at the clinic.</div>
+    <div class="form">
+      <div class="field"><label>Handover JSON — ${esc(p.name)}</label>
+        <textarea id="clinic_json" readonly rows="8" style="font-family:ui-monospace,monospace;font-size:11px;line-height:1.45;max-height:32vh">${esc(text)}</textarea>
+      </div>
+    </div>
+    <div class="formbtns">
+      <button class="btn ghost" onclick="closeClinicExport()">Close</button>
+      ${navigator.share ? '<button class="btn ghost" onclick="shareClinicExport()">Share…</button>' : ''}
+      <button class="btn primary" onclick="copyClinicExport()">Copy JSON</button>
+    </div>`;
+  $('clinicScrim').classList.add('show');
+  $('clinicsheet').classList.add('show');
+}
+function closeClinicExport() {
+  $('clinicScrim').classList.remove('show');
+  $('clinicsheet').classList.remove('show');
+}
+async function copyClinicExport() {
+  const ta = $('clinic_json'); if (!ta) return;
+  try {
+    await navigator.clipboard.writeText(ta.value);
+  } catch {
+    // clipboard API unavailable (non-secure context / old browser) — select
+    // the text and use the legacy path so the button still works
+    ta.select(); ta.setSelectionRange(0, ta.value.length);
+    if (!document.execCommand('copy')) { toast('Copy failed — long-press the text to copy'); return; }
+  }
+  toast('Copied — paste into Brain Clinic new-patient import', '✓');
+}
+async function shareClinicExport() {
+  const ta = $('clinic_json'); if (!ta) return;
+  try { await navigator.share({ text: ta.value }); }
+  catch (e) { if (e && e.name !== 'AbortError') toast('Share failed — use Copy instead'); }
 }
 
 // ============================ Manage hospitals ============================
@@ -1760,7 +1819,8 @@ Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, close
   openValueEdit, closeValueEdit, saveValueEdit,
   openMedForm, closeMedForm, medSetWarn, saveMed, deleteMed,
   openLabsManager, closeLabsManager, toggleTrackNa, addCustomLab, removeCustomLab,
-  openLabReading, saveLabReading });
+  openLabReading, saveLabReading,
+  openClinicExport, closeClinicExport, copyClinicExport, shareClinicExport, dobToAge });
 
 // ---- register the PWA service worker (added by vite-plugin-pwa on build) ----
 if ('serviceWorker' in navigator) {

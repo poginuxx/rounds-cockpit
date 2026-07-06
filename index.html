@@ -137,6 +137,7 @@
       <div class="lead">Core fields now — rich data (labs, meds, Ask) arrives via the nightly intake screen (step 2).</div>
       <div class="form">
         <div class="field"><label>Name</label><input id="f_name" placeholder="Juan Santos"></div>
+        <div class="field"><label>Birthdate <small style="font-weight:400;color:var(--faint)">(optional — fills age)</small></label><input id="f_dob" type="date" onchange="dobToAge()"></div>
         <div class="frow">
           <div class="field"><label>Age</label><input id="f_age" inputmode="numeric" placeholder="60"></div>
           <div class="field"><label>Sex</label><select id="f_sex"><option>M</option><option>F</option></select></div>
@@ -149,9 +150,16 @@
       </div>
       <div class="formbtns">
         <button class="btn ghost danger" id="btnDeletePatient" style="display:none; margin-right:auto;" onclick="doDeletePatient()">Delete</button>
+        <button class="btn ghost" id="btnClinicExport" style="display:none;" onclick="openClinicExport()">Send to clinic</button>
         <button class="btn ghost" onclick="closeAdd()">Cancel</button>
         <button class="btn primary" onclick="savePatient()">Encrypt &amp; save</button></div>
     </div>
+
+    <!-- send-to-clinic sheet: discharge handover JSON for the Brain Clinic app's
+         "Import from JSON" box (filled by JS). Copy/Share only — the app itself
+         never uploads or stores this plaintext anywhere. -->
+    <div class="scrim" id="clinicScrim" onclick="closeClinicExport()"></div>
+    <div class="addsheet" id="clinicsheet"></div>
 
     <!-- manage-hospitals sheet: the user-managed hospital list (filled by JS) -->
     <div class="scrim" id="hospScrim" onclick="closeHospitals()"></div>

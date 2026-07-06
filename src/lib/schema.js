@@ -12,6 +12,10 @@ export function newPatient(fields = {}) {
   return {
     id: fields.id || 'p_' + Date.now(),
     name: '', age: '', sex: 'M',
+    dob: '',               // birthdate, ISO YYYY-MM-DD — OPTIONAL. Never fabricated:
+                            //   blank unless the physician entered a real date. Age
+                            //   stays its own field (entered directly or derived via
+                            //   ageFromDob when a birthdate is typed).
     dx: '', day: '1', detail: '',
     hospital: '', room: '',
     triage: 'g',           // 'g' | 'a' | 'r' — derived by diff.js, not set by hand
@@ -99,6 +103,22 @@ function stepBack({ mm, dd }, days) {
   const d = new Date(2026, mm - 1, dd);
   d.setDate(d.getDate() - days);
   return String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0');
+}
+
+/**
+ * Age in completed years from an ISO birthdate (YYYY-MM-DD), as a string for
+ * the age field. Returns '' for blank/invalid/implausible input (future date,
+ * >130y) — never a guess. `now` is injectable for tests.
+ */
+export function ageFromDob(dob, now = new Date()) {
+  if (!dob) return '';
+  const d = new Date(dob + 'T00:00:00');
+  if (isNaN(d)) return '';
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
+  if (age < 0 || age > 130) return '';
+  return String(age);
 }
 
 /**
