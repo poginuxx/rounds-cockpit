@@ -11,6 +11,9 @@ import { defaultWindows } from './strokeclock.js';
 export function newPatient(fields = {}) {
   return {
     id: fields.id || 'p_' + Date.now(),
+    clinicAdmissionId: null, // Brain Clinic admissions.id once linked by a census
+                             //   import (lib/censusImport.js) — the EXACT-match
+                             //   sync key between the two apps; never fuzzy-matched.
     name: '', age: '', sex: 'M',
     dob: '',               // birthdate, ISO YYYY-MM-DD — OPTIONAL. Never fabricated:
                             //   blank unless the physician entered a real date. Age

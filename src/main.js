@@ -29,6 +29,8 @@ import {
 import { recognize } from './lib/ocr.js';
 import { createBackup, readBackup, passphraseStrength, BackupError } from './lib/backup.js';
 import { clinicExportText } from './lib/clinicExport.js';
+import { readCensus, planImport, CensusError } from './lib/censusImport.js';
+import { clinicUpdatesText } from './lib/clinicUpdates.js';
 
 // ---- where your model API key would come from (kept null = offline parsing) ----
 // To enable the cloud parser, store the key in the encrypted vault and return it
@@ -1810,6 +1812,182 @@ async function doUndoRestore() {
 
 function cancelRestore() { restore = freshRestore(); renderBackup(); }
 
+// ============================ clinic sync ============================
+// Both halves of the daily file loop with the Brain Clinic desktop app:
+//   import census  (lib/censusImport.js — clinic → cockpit)
+//   send updates   (lib/clinicUpdates.js — cockpit → clinic)
+// All decisions live in those pure, tested modules; this section only renders
+// the plan and commits what the user confirms — imported records are encrypted
+// and saved through store.js like everything else, and the updates file is
+// only ever handed over via an explicit download/share tap.
+
+const freshCensus = () => ({ step: 'pick', fileName: null, fileText: null, plan: null, done: null, sendSkip: new Set() });
+let census = freshCensus();
+
+function openCensusImport() { census = freshCensus(); renderCensusImport(); $('censusScrim').classList.add('show'); $('censussheet').classList.add('show'); }
+function closeCensusImport() { $('censusScrim').classList.remove('show'); $('censussheet').classList.remove('show'); }
+function pickCensusFile() { $('censusFile').click(); }
+
+async function handleCensusFile(ev) {
+  const f = ev.target.files && ev.target.files[0];
+  ev.target.value = ''; // allow re-selecting the same file later
+  if (!f) return;
+  try {
+    census.fileText = await f.text();
+    census.fileName = f.name;
+  } catch { toast('Could not read that file.'); return; }
+  renderCensusImport();
+}
+
+function censusPreview() {
+  const pasted = $('cs_paste') ? $('cs_paste').value : '';
+  const text = census.fileText || pasted;
+  if (!text.trim()) { toast('Choose the census file or paste its contents'); return; }
+  try {
+    const payload = readCensus(text);
+    census.plan = planImport(payload, state.patients);
+    census.exportedAt = payload.exported_at || '';
+    census.step = 'previewed';
+    renderCensusImport();
+  } catch (e) {
+    toast(e instanceof CensusError ? e.message : 'Could not read this census file.');
+  }
+}
+
+function censusToggle(kind, i, el) {
+  const item = census.plan[kind][i];
+  item.include = !item.include;
+  el.classList.toggle('on', item.include);
+  el.textContent = item.include ? '✓' : '';
+}
+
+function censusSendToggle(pid, el) {
+  if (census.sendSkip.has(pid)) census.sendSkip.delete(pid);
+  else census.sendSkip.add(pid);
+  const on = !census.sendSkip.has(pid);
+  el.classList.toggle('on', on);
+  el.textContent = on ? '✓' : '';
+}
+
+async function censusSend() {
+  const linked = state.patients.filter((p) => p.clinicAdmissionId != null);
+  const extra = state.patients.filter((p) => p.clinicAdmissionId == null && !census.sendSkip.has(p.id));
+  if (!linked.length && !extra.length) { toast('No patients to send'); return; }
+  const text = clinicUpdatesText(linked.concat(extra));
+  // deliverBackupFile is the generic hand-to-the-user path (share sheet in the
+  // installed PWA, download elsewhere); the file goes only where the user picks.
+  const ok = await deliverBackupFile(text, `rounds_updates_${new Date().toISOString().slice(0, 10)}.json`);
+  toast(ok ? 'Updates file created — import it in Brain Clinic' : 'Cancelled — nothing was saved');
+}
+
+async function censusApply() {
+  const plan = census.plan;
+  if (!plan) return;
+  let created = 0, updated = 0;
+  for (const c of plan.creates) {
+    if (!c.include) continue;
+    const p = newPatient(c.fields);
+    p.triage = computeTriage(p); // derived, never authored (invariant #5)
+    await store.savePatient(p);
+    created++;
+  }
+  for (const u of plan.updates) {
+    if (!u.include) continue;
+    u.next.triage = computeTriage(u.next);
+    await store.savePatient(u.next);
+    updated++;
+  }
+  await loadPatients();
+  renderToday();
+  census.step = 'done';
+  census.done = { created, updated };
+  renderCensusImport();
+  toast(`${created + updated} record${created + updated === 1 ? '' : 's'} imported`, '✓');
+}
+
+function censusRow(kind, i, title, sub, extra = '') {
+  const item = census.plan[kind][i];
+  return `<div class="crow"><div class="cbx ${item.include ? 'on' : ''}" onclick="censusToggle('${kind}',${i},this)">${item.include ? '✓' : ''}</div>
+    <div class="cmid"><div class="cf">${esc(title)}</div><div class="cv">${sub}</div></div>${extra}</div>`;
+}
+
+function renderCensusImport() {
+  let inner = '';
+  if (census.step === 'done') {
+    inner = `
+      <div class="bk-ok">✓ Imported: ${census.done.created} new patient${census.done.created === 1 ? '' : 's'}, ${census.done.updated} updated. Everything was encrypted and saved on this phone.</div>
+      <div class="formbtns"><button class="btn primary" onclick="closeCensusImport()">Done</button></div>`;
+  } else if (census.step === 'previewed') {
+    const plan = census.plan;
+    let rows = '';
+    if (plan.creates.length) {
+      rows += `<div class="pgroup"><div class="gh"><span class="nm">New patients</span><span class="lc">will be created</span></div>`;
+      plan.creates.forEach((c, i) => {
+        rows += censusRow('creates', i, c.name, `<span class="new good">${esc(c.summary || 'no details')}</span>`,
+          c.nameClash ? '<span class="crit">same name exists</span>' : '');
+      });
+      rows += `</div>`;
+    }
+    if (plan.updates.length) {
+      rows += `<div class="pgroup"><div class="gh"><span class="nm">Updates</span><span class="lc">matched by clinic link</span></div>`;
+      plan.updates.forEach((u, i) => {
+        rows += censusRow('updates', i, u.name,
+          u.changes.map((c) => `<span class="new">${esc(c)}</span>`).join('<br>'));
+      });
+      rows += `</div>`;
+    }
+    const notes = [];
+    if (plan.unchanged.length) notes.push(`${plan.unchanged.length} patient${plan.unchanged.length === 1 ? '' : 's'} already up to date.`);
+    plan.absent.forEach((a) => notes.push(`⚑ ${a.name} is linked to the clinic but not in this census — possibly discharged there. Nothing here is changed or deleted.`));
+    plan.warnings.forEach((w) => notes.push(`⚑ ${w}`));
+    const noteHtml = notes.length ? `<div class="bk-warn">${notes.map(esc).join('<br>')}</div>` : '';
+    const nothing = !plan.creates.length && !plan.updates.length;
+    inner = `
+      ${census.exportedAt ? `<div class="bk-file">Census exported: <b>${esc(census.exportedAt)}</b></div>` : ''}
+      ${rows || '<div class="bk-note">This census adds nothing new — you are in sync.</div>'}
+      ${noteHtml}
+      <div class="formbtns">
+        <button class="btn ghost" onclick="openCensusImport()">Back</button>
+        ${nothing ? '' : '<button class="btn primary" onclick="censusApply()">Import confirmed items</button>'}
+      </div>`;
+  } else {
+    const fileLabel = census.fileName ? `Selected: <b>${esc(census.fileName)}</b>` : 'No file chosen';
+    const linked = state.patients.filter((p) => p.clinicAdmissionId != null);
+    const unlinked = state.patients.filter((p) => p.clinicAdmissionId == null);
+    const unlinkedRows = unlinked.map((p) => {
+      const on = !census.sendSkip.has(p.id);
+      const sub = [p.dx, abbrFor(state.hospitals, p.hospital), p.room ? 'Rm ' + p.room : '']
+        .filter(Boolean).join(' · ');
+      return `<div class="crow"><div class="cbx ${on ? 'on' : ''}" onclick="censusSendToggle('${jsq(p.id)}',this)">${on ? '✓' : ''}</div>
+        <div class="cmid"><div class="cf">${esc(p.name)}</div><div class="cv">${esc(sub)}</div></div></div>`;
+    }).join('');
+    inner = `
+      <div class="bk-sect" style="margin-top:0;padding-top:0;border-top:none">
+        <div class="bk-sect-h">Get the clinic census</div>
+        <div class="bk-note">Use <b>Brain Clinic → In-Patients → Export for cockpit</b>, then load the file here. You review every change before anything is saved; imports never delete a patient.</div>
+        <button class="btn ghost" onclick="pickCensusFile()">Choose census file…</button>
+        <div class="bk-file">${fileLabel}</div>
+        <div class="field"><label>…or paste the file's contents</label>
+          <textarea id="cs_paste" rows="3" placeholder='{"format":"clinic-census", …}' style="width:100%"></textarea></div>
+        <button class="btn primary" onclick="censusPreview()">Preview what will change</button>
+      </div>
+      <div class="bk-sect">
+        <div class="bk-sect-h">Send updates to the clinic</div>
+        <div class="bk-note">Creates a plain JSON file for <b>Brain Clinic → In-Patients → Import updates</b>: today's scores, ask answers, plan, meds and dated labs. Re-importing the same file is safe — the clinic only adds what it doesn't already have.</div>
+        <div class="bk-file">${linked.length} linked patient${linked.length === 1 ? '' : 's'} will send updates.</div>
+        ${unlinked.length ? `<div class="bk-note" style="margin-bottom:6px">Not at the clinic yet — ticked patients are registered there as new admissions:</div><div class="pgroup">${unlinkedRows}</div>` : ''}
+        <button class="btn primary" onclick="censusSend()">Create updates file</button>
+      </div>
+      <div class="formbtns"><button class="btn ghost" onclick="closeCensusImport()">Close</button></div>`;
+  }
+
+  $('censussheet').innerHTML = `
+    <div class="grab"></div>
+    <h2>Clinic sync</h2>
+    <div class="lead">Two-way sync with the Brain Clinic desktop app via files you carry yourself — this app uploads nothing.</div>
+    <div class="form">${inner}</div>`;
+}
+
 // ============================ toast ============================
 let tt;
 function toast(m, ok) { const t = $('toast'); t.innerHTML = (ok ? `<span class="ok">${ok}</span>` : '') + m; t.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => t.classList.remove('show'), 1800); }
@@ -1822,7 +2000,9 @@ Object.assign(window, { lockApp, goTab, openCard, closeCard, openTimeline, close
   openMedForm, closeMedForm, medSetWarn, saveMed, deleteMed,
   openLabsManager, closeLabsManager, toggleTrackNa, addCustomLab, removeCustomLab,
   openLabReading, saveLabReading,
-  openClinicExport, closeClinicExport, copyClinicExport, shareClinicExport, dobToAge });
+  openClinicExport, closeClinicExport, copyClinicExport, shareClinicExport, dobToAge,
+  openCensusImport, closeCensusImport, pickCensusFile, handleCensusFile,
+  censusPreview, censusToggle, censusApply, censusSendToggle, censusSend });
 
 // ---- register the PWA service worker (added by vite-plugin-pwa on build) ----
 if ('serviceWorker' in navigator) {

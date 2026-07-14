@@ -35,6 +35,7 @@
           <div class="top">
             <div><h1>Today's rounds</h1><div class="date" id="todayDate">—</div></div>
             <div class="top-ctl">
+              <button class="iconbtn" onclick="openCensusImport()" title="Clinic sync">📥</button>
               <button class="iconbtn" onclick="openBackup()" title="Backup &amp; restore">💾</button>
               <button class="iconbtn" onclick="openHospitals()" title="Manage hospitals">🏥</button>
               <button class="iconbtn" onclick="lockApp()" title="Lock">⏻</button>
@@ -170,6 +171,15 @@
     <input type="file" accept=".rcbackup,.json,application/json" id="bkFile" hidden onchange="handleBackupFile(event)">
     <div class="scrim" id="bkScrim" onclick="closeBackup()"></div>
     <div class="addsheet" id="bksheet"></div>
+
+    <!-- clinic sync sheet: two-way file loop with the Brain Clinic desktop app.
+         Import census — reads its "Export for cockpit" JSON, shows a review plan
+         (create/update/absent), commits only what the user confirms.
+         Send updates — builds the JSON its "Import updates" screen accepts,
+         handed over via explicit download/share only. Nothing is uploaded. -->
+    <input type="file" accept=".json,application/json" id="censusFile" hidden onchange="handleCensusFile(event)">
+    <div class="scrim" id="censusScrim" onclick="closeCensusImport()"></div>
+    <div class="addsheet" id="censussheet"></div>
 
     <!-- motor-grade picker (fast cell editor for the MRC power grid) -->
     <div class="mpick-scrim" id="mpickScrim" onclick="closeMpick()"></div>
